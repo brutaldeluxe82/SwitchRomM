@@ -1,6 +1,7 @@
 #pragma once
 
 #include "romm/errors.hpp"
+#include "romm/layout.hpp"
 #include <string>
 
 namespace romm {
@@ -17,8 +18,13 @@ struct Config {
     std::string password;
     // Platform slug (optional; UI drives selection when empty)
     std::string platform{""};
-    // Destination directory on SD for downloads (platform/rom subfolders created automatically)
-    std::string downloadDir{"sdmc:/romm_cache"};
+    // Output layout ("tico" | "retroarch"); drives default dirs and extraction.
+    std::string outputLayout{"tico"};
+    // Destination directory on SD for downloads (platform/rom subfolders created automatically).
+    // Empty derives from the output layout (see effectiveDownloadDir).
+    std::string downloadDir{""};
+    // BIOS directory base. Empty derives from the output layout (see effectiveBiosDir).
+    std::string biosDir{""};
     // HTTP timeout (seconds) for network calls
     int httpTimeoutSeconds{30};
     // FAT32-safe split flag
@@ -32,6 +38,19 @@ struct Config {
     std::string platformPrefsPathSd{"sdmc:/switch/SwitchRomM/platform_prefs.json"};
     std::string platformPrefsPathRomfs{"romfs:/platform_prefs.json"};
 };
+
+// Effective download root for a config: explicit downloadDir if set, else the
+// layout's default.
+inline std::string effectiveDownloadDir(const Config& c) {
+    OutputLayout layout = parseOutputLayout(c.outputLayout);
+    return c.downloadDir.empty() ? defaultDownloadDir(layout) : c.downloadDir;
+}
+
+// Effective BIOS root for a config: explicit biosDir if set, else the layout's default.
+inline std::string effectiveBiosDir(const Config& c) {
+    OutputLayout layout = parseOutputLayout(c.outputLayout);
+    return c.biosDir.empty() ? defaultBiosDir(layout) : c.biosDir;
+}
 
 bool loadConfig(Config& outCfg, std::string& outError, ErrorInfo* outInfo = nullptr);
 

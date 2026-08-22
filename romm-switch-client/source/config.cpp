@@ -117,7 +117,9 @@ static bool parseEnvStream(std::istream& in, Config& outCfg) {
         else if (key == "username") outCfg.username = val;
         else if (key == "password") outCfg.password = val;
         else if (key == "platform") outCfg.platform = val;
+        else if (key == "output_layout") outCfg.outputLayout = val;
         else if (key == "download_dir") outCfg.downloadDir = val;
+        else if (key == "bios_dir") outCfg.biosDir = val;
         else if (key == "http_timeout_seconds") outCfg.httpTimeoutSeconds = std::atoi(val.c_str());
         else if (key == "fat32_safe") {
             std::string v = toLower(val);
@@ -154,7 +156,9 @@ static void migrateSchema0To1(mini::Object& obj) {
     aliasKeyIfMissing(obj, "USERNAME", "username");
     aliasKeyIfMissing(obj, "PASSWORD", "password");
     aliasKeyIfMissing(obj, "PLATFORM", "platform");
+    aliasKeyIfMissing(obj, "OUTPUT_LAYOUT", "output_layout");
     aliasKeyIfMissing(obj, "DOWNLOAD_DIR", "download_dir");
+    aliasKeyIfMissing(obj, "BIOS_DIR", "bios_dir");
     aliasKeyIfMissing(obj, "HTTP_TIMEOUT_SECONDS", "http_timeout_seconds");
     aliasKeyIfMissing(obj, "FAT32_SAFE", "fat32_safe");
     aliasKeyIfMissing(obj, "LOG_LEVEL", "log_level");
@@ -164,8 +168,10 @@ static void migrateSchema0To1(mini::Object& obj) {
     aliasKeyIfMissing(obj, "PLATFORM_PREFS_ROMFS", "platform_prefs_romfs");
 
     aliasKeyIfMissing(obj, "serverUrl", "server_url");
+    aliasKeyIfMissing(obj, "outputLayout", "output_layout");
     aliasKeyIfMissing(obj, "apiToken", "api_token");
     aliasKeyIfMissing(obj, "downloadDir", "download_dir");
+    aliasKeyIfMissing(obj, "biosDir", "bios_dir");
     aliasKeyIfMissing(obj, "httpTimeoutSeconds", "http_timeout_seconds");
     aliasKeyIfMissing(obj, "fat32Safe", "fat32_safe");
     aliasKeyIfMissing(obj, "logLevel", "log_level");
@@ -249,7 +255,9 @@ static bool parseJsonObject(mini::Object& obj, Config& outCfg, std::string& outE
     getStr("username", outCfg.username);
     getStr("password", outCfg.password);
     getStr("platform", outCfg.platform);
+    getStr("output_layout", outCfg.outputLayout);
     getStr("download_dir", outCfg.downloadDir);
+    getStr("bios_dir", outCfg.biosDir);
     getInt("http_timeout_seconds", outCfg.httpTimeoutSeconds);
     getBool("fat32_safe", outCfg.fat32Safe);
     {
@@ -296,10 +304,10 @@ bool loadConfig(Config& outCfg, std::string& outError, ErrorInfo* outInfo) {
         return false;
     }
 
-    if (outCfg.serverUrl.empty() || outCfg.downloadDir.empty()) {
+    if (outCfg.serverUrl.empty()) {
         if (outError.empty()) {
             setConfigError(outError, outInfo,
-                           "Config missing server_url or download_dir.",
+                           "Config missing server_url.",
                            ErrorCode::MissingRequiredField,
                            "Required config field is missing.");
         } else if (outInfo) {
@@ -325,8 +333,6 @@ bool parseEnvString(const std::string& contents, Config& outCfg, std::string& ou
     if (outInfo) *outInfo = ErrorInfo{};
     outError.clear();
     outCfg = Config{};
-    // Force required fields to be explicitly provided in tests.
-    outCfg.downloadDir.clear();
     std::istringstream iss(contents);
     if (!parseEnvStream(iss, outCfg)) {
         setConfigError(outError, outInfo, "Failed to parse env string",
@@ -335,8 +341,8 @@ bool parseEnvString(const std::string& contents, Config& outCfg, std::string& ou
         return false;
     }
     // mimic normal flow: basic validation
-    if (outCfg.serverUrl.empty() || outCfg.downloadDir.empty()) {
-        setConfigError(outError, outInfo, "Config missing server_url or download_dir.",
+    if (outCfg.serverUrl.empty()) {
+        setConfigError(outError, outInfo, "Config missing server_url.",
                        ErrorCode::MissingRequiredField,
                        "Required config field is missing.");
         return false;
@@ -355,9 +361,6 @@ bool parseJsonString(const std::string& contents, Config& outCfg, std::string& o
     if (outInfo) *outInfo = ErrorInfo{};
     outError.clear();
     outCfg = Config{};
-    // Force required fields to be explicitly provided in tests.
-    outCfg.downloadDir.clear();
-
     mini::Object obj;
     if (!mini::parse(contents, obj)) {
         setConfigError(outError, outInfo, "Invalid config JSON.",
@@ -369,8 +372,8 @@ bool parseJsonString(const std::string& contents, Config& outCfg, std::string& o
         if (outInfo) *outInfo = classifyError(outError, ErrorCategory::Config);
         return false;
     }
-    if (outCfg.serverUrl.empty() || outCfg.downloadDir.empty()) {
-        setConfigError(outError, outInfo, "Config missing server_url or download_dir.",
+    if (outCfg.serverUrl.empty()) {
+        setConfigError(outError, outInfo, "Config missing server_url.",
                        ErrorCode::MissingRequiredField,
                        "Required config field is missing.");
         return false;

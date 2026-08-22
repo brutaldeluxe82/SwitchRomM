@@ -35,7 +35,8 @@ TEST_CASE("parseEnvString accepts speed_test_url optional") {
 }
 
 TEST_CASE("parseEnvString rejects missing required fields") {
-    const std::string env = "server_url=http://example.com\n";
+    // Since download_dir now derives from layout, the only hard requirement is server_url.
+    const std::string env = "download_dir=sdmc:/cache\n";
     romm::Config cfg;
     std::string err;
     bool ok = romm::parseEnvString(env, cfg, err);

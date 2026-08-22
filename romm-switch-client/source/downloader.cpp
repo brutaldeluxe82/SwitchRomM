@@ -643,10 +643,10 @@ static bool downloadOneFile(Game g, const DownloadFileSpec* spec, Status& status
     if (romSafe.empty()) romSafe = "rom";
     if (fileSafe.empty()) fileSafe = "file";
     // Final outputs live under <downloadDir>/<platform>/<title__id.ext>
-    std::string baseDir = cfg.downloadDir + "/" + platSafe + "/" + romFolderName(g);
+    std::string baseDir = effectiveDownloadDir(cfg) + "/" + platSafe + "/" + romFolderName(g);
     ensureDirectory(baseDir);
     // Temps live under <downloadDir>/temp/<platform>/<romId>/<fileId>/...
-    std::string tempRoot = cfg.downloadDir + "/temp/" + platSafe + "/" + romSafe + "/" + fileSafe;
+    std::string tempRoot = effectiveDownloadDir(cfg) + "/temp/" + platSafe + "/" + romSafe + "/" + fileSafe;
     ensureDirectory(tempRoot);
 
     // free space check for full ROM upfront (best effort)
@@ -979,10 +979,30 @@ static bool downloadOneFile(Game g, const DownloadFileSpec* spec, Status& status
         setDownloadFailureState(status, true, "Finalize failed");
         return false;
     }
+    // Layouts that require extraction (tico): expand .zip downloads into the game
+    // folder (parent of the zip) and remove the archive afterwards.
+    if (layoutRequiresExtraction(parseOutputLayout(cfg.outputLayout))) {
+        std::string ext = finalPath.extension().string();
+        for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (ext == ".zip") {
+            std::string xerr;
+            if (!extractZipToDir(finalPath.string(), baseDir, xerr)) {
+                logLine("Zip extract failed for " + finalPath.string() + ": " + xerr);
+                setDownloadFailureState(status, true, "Zip extract failed");
+                return false;
+            }
+            std::error_code rEc;
+            std::filesystem::remove(finalPath, rEc);
+            if (rEc) {
+                logLine("Warning: failed to remove extracted zip " + finalPath.string());
+            }
+            logLine("Extracted " + finalPath.string() + " into " + baseDir);
+        }
+    }
     // Clean up temp root for this fileId now that finalize succeeded.
     removeDirRecursive(tempRoot);
     // Remove any empty parent directories under <downloadDir>/temp/<platform>/<romId>/...
-    std::filesystem::path stop = std::filesystem::path(cfg.downloadDir) / "temp";
+    std::filesystem::path stop = std::filesystem::path(effectiveDownloadDir(cfg)) / "temp";
     removeEmptyParents(std::filesystem::path(tempRoot).parent_path(), stop);
     removeEmptyParents(std::filesystem::path(tempRoot).parent_path().parent_path(), stop);
     {
@@ -1169,7 +1189,7 @@ static void workerLoop() {
 bool loadLocalManifests(Status& status, const Config& cfg, std::string& outError) {
     namespace fs = std::filesystem;
     outError.clear();
-    const fs::path tempRoot = fs::path(cfg.downloadDir) / "temp";
+    const fs::path tempRoot = fs::path(effectiveDownloadDir(cfg)) / "temp";
     if (!fs::exists(tempRoot)) return true; // nothing to load
 
     struct Found {

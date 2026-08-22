@@ -40,6 +40,10 @@ uint64_t getFreeSpace(const std::string& path) {
 }
 
 bool isGameCompletedOnDisk(const Game& g, const Config& cfg) {
+    return isGameCompletedOnDisk(g, effectiveDownloadDir(cfg));
+}
+
+bool isGameCompletedOnDisk(const Game& g, const std::string& downloadRoot) {
     std::string idSafe = safeName(!g.id.empty() ? g.id : g.fileId);
     std::string romSafe = idSafe.empty() ? safeName(g.title) : idSafe;
     if (romSafe.empty()) romSafe = "rom";
@@ -50,7 +54,7 @@ bool isGameCompletedOnDisk(const Game& g, const Config& cfg) {
     std::error_code ec;
 
     // Primary new layout: <downloadDir>/<platform>/<title_id>/...
-    std::filesystem::path baseDir = std::filesystem::path(cfg.downloadDir) / plat / folder;
+    std::filesystem::path baseDir = std::filesystem::path(downloadRoot) / plat / folder;
     if (std::filesystem::exists(baseDir, ec)) {
         if (std::filesystem::is_regular_file(baseDir, ec)) return true;
         if (std::filesystem::is_directory(baseDir, ec)) {
@@ -59,12 +63,12 @@ bool isGameCompletedOnDisk(const Game& g, const Config& cfg) {
         }
     }
 
-    // Backward compatibility: flat layout under <downloadDir>/<platform>/ and <downloadDir>/.
+    // Backward compatibility: flat layout under <root>/<platform>/ and <root>/.
     std::vector<std::filesystem::path> candidates;
-    candidates.push_back(std::filesystem::path(cfg.downloadDir) / plat / (romSafe + ".xci"));
-    candidates.push_back(std::filesystem::path(cfg.downloadDir) / plat / (romSafe + ".nsp"));
-    candidates.push_back(std::filesystem::path(cfg.downloadDir) / (romSafe + ".xci"));
-    candidates.push_back(std::filesystem::path(cfg.downloadDir) / (romSafe + ".nsp"));
+    candidates.push_back(std::filesystem::path(downloadRoot) / plat / (romSafe + ".xci"));
+    candidates.push_back(std::filesystem::path(downloadRoot) / plat / (romSafe + ".nsp"));
+    candidates.push_back(std::filesystem::path(downloadRoot) / (romSafe + ".xci"));
+    candidates.push_back(std::filesystem::path(downloadRoot) / (romSafe + ".nsp"));
     for (const auto& p : candidates) {
         if (!std::filesystem::exists(p, ec)) continue;
         if (std::filesystem::is_regular_file(p, ec)) return true;

@@ -16,5 +16,7 @@ uint64_t getFreeSpace(const std::string& path);
 
 // Determine if a game's final output appears to be on disk (ID-suffixed, with/without extension).
 bool isGameCompletedOnDisk(const Game& g, const Config& cfg);
+// Same check against an explicit download root (layout-derived by the Config overload).
+bool isGameCompletedOnDisk(const Game& g, const std::string& downloadRoot);
 
 } // namespace romm

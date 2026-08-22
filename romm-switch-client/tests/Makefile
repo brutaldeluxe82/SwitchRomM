@@ -14,6 +14,7 @@ CXXFLAGS ?= -std=c++17 -Wall -Wextra -I../include -I../tests/include -DUNIT_TEST
 TARGET := romm_tests
 SOURCES := ../source/api.cpp \
            ../source/config.cpp \
+           ../source/layout.cpp \
            ../source/filesystem.cpp \
            ../source/manifest.cpp \
            ../source/http_common.cpp \
@@ -29,6 +30,8 @@ SOURCES := ../source/api.cpp \
            test_downloader_plan.cpp \
            test_status_queue.cpp \
            test_config.cpp \
+           test_config_layout.cpp \
+           test_layout.cpp \
            test_thread_safety.cpp \
            test_config_env.cpp \
            test_errors.cpp \
@@ -46,7 +49,7 @@ SOURCES := ../source/api.cpp \
 all: $(TARGET)
 
 $(TARGET): $(SOURCES)
-	$(CXX) $(CXXFLAGS) -o $@ $(SOURCES)
+	$(CXX) $(CXXFLAGS) -o $@ $(SOURCES) -lminizip -lz
 
 .PHONY: clean
 clean:
