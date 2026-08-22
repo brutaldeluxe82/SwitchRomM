@@ -13,6 +13,12 @@ struct Platform {
     int romCount{0};
 };
 
+struct Firmware {
+    long long id{0};
+    std::string fileName;
+    unsigned long long fileSizeBytes{0};
+};
+
 struct RomFile {
     std::string id;
     std::string name;

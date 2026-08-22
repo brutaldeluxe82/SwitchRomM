@@ -50,6 +50,7 @@ extern "C" void stbi_image_free(void *retval_from_stbi_load);
 #include "romm/platform_prefs.hpp"
 #include "romm/queue_policy.hpp"
 #include "romm/queue_store.hpp"
+#include "romm/firmware.hpp"
 #include "romm/speed_test.hpp"
 
 using romm::Status;
@@ -609,6 +610,10 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
         bool diagnosticsProbeInFlight{false};
         uint32_t diagnosticsLastProbeMs{0};
         std::string diagnosticsLastProbeDetail;
+        int firmwarePlatformIndex{0};
+        std::vector<romm::Firmware> firmwareList;
+        std::string firmwareStatusText;
+        bool firmwareBusy{false};
         bool updateCheckInFlight{false};
         bool updateChecked{false};
         bool updateAvailable{false};
@@ -679,6 +684,10 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
         snap.diagnosticsProbeInFlight = status.diagnosticsProbeInFlight;
         snap.diagnosticsLastProbeMs = status.diagnosticsLastProbeMs;
         snap.diagnosticsLastProbeDetail = status.diagnosticsLastProbeDetail;
+        snap.firmwarePlatformIndex = status.firmwarePlatformIndex;
+        snap.firmwareList = status.firmwareList;
+        snap.firmwareStatusText = status.firmwareStatusText;
+        snap.firmwareBusy = status.firmwareBusy.load();
         snap.updateCheckInFlight = status.updateCheckInFlight;
         snap.updateChecked = status.updateChecked;
         snap.updateAvailable = status.updateAvailable;
@@ -1505,6 +1514,19 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
         }
         drawText(renderer, box.x + 16, y, "SD Free: " + humanSize(freeBytes), sub, 2); y += 30;
 
+        drawText(renderer, box.x + 16, y, "Firmware", fg, 2); y += 26;
+        std::string fwPlatform = "(no platforms)";
+        if (!snap.platforms.empty() &&
+            snap.firmwarePlatformIndex >= 0 &&
+            snap.firmwarePlatformIndex < (int)snap.platforms.size()) {
+            fwPlatform = snap.platforms[(size_t)snap.firmwarePlatformIndex].name;
+        }
+        drawText(renderer, box.x + 16, y, "Platform: " + ellipsize(fwPlatform, 52),
+                 snap.firmwareBusy ? SDL_Color{255,210,160,255} : sub, 2); y += 24;
+        std::string fwStatus = snap.firmwareBusy ? "Checking firmware..." : snap.firmwareStatusText;
+        if (fwStatus.empty()) fwStatus = "(not synced yet)";
+        drawText(renderer, box.x + 16, y, ellipsize(fwStatus, 62), sub, 2); y += 30;
+
         drawText(renderer, box.x + 16, y, "Queue", fg, 2); y += 26;
         drawText(renderer, box.x + 16, y,
                  "Active: " + std::to_string(snap.queueCount) +
@@ -1517,8 +1539,11 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
                               " / " + romm::errorCodeLabel(snap.lastErrorInfo.code);
         drawText(renderer, box.x + 16, y, errHead, sub, 2); y += 24;
         drawText(renderer, box.x + 16, y, ellipsize(snap.lastError.empty() ? "(none)" : snap.lastError, 64), sub, 2); y += 24;
-        drawText(renderer, box.x + 16, box.y + box.h - 52,
+        drawText(renderer, box.x + 16, box.y + box.h - 78,
                  "A=export summary to log  B=back  R=refresh probe",
+                 fg, 2);
+        drawText(renderer, box.x + 16, box.y + box.h - 50,
+                 "\xE2\x97\x80\xE2\x96\xB6 platform  \xE2\x96\xBC sync BIOS",
                  fg, 2);
     } else if (snap.view == Status::View::UPDATER) {
         header = "UPDATER";
@@ -1933,11 +1958,23 @@ int main(int argc, char** argv) {
         std::string error;
         romm::ErrorInfo errorInfo{};
     };
+    struct FirmwareSyncReq {
+        uint64_t generation{0};
+        std::string platformSlug;
+        std::string platformId;
+        std::string platformName;
+    };
+    struct FirmwareSyncResultMsg {
+        uint64_t generation{0};
+        std::string statusText;
+    };
     romm::LatestJobWorker<PendingRomFetch, RomFetchResult> romFetchJobs;
     romm::LatestJobWorker<PendingRemoteSearch, RemoteSearchResult> remoteSearchJobs;
     romm::LatestJobWorker<DiagProbeReq, DiagProbeResult> diagProbeJobs;
     romm::LatestJobWorker<UpdateCheckReq, UpdateCheckResult> updateCheckJobs;
     romm::LatestJobWorker<UpdateDownloadReq, UpdateDownloadResult> updateDownloadJobs;
+    romm::LatestJobWorker<FirmwareSyncReq, FirmwareSyncResultMsg> firmwareSyncJobs;
+    uint64_t firmwareSyncGeneration = 0;
     uint64_t updateGeneration = 0;
     uint64_t updateCheckGenSubmitted = 0;
     uint64_t updateDownloadGenSubmitted = 0;
@@ -2321,6 +2358,22 @@ int main(int argc, char** argv) {
         diagProbeJobs.submit(req);
     };
 
+    auto submitFirmwareSync = [&](const std::string& slug, const std::string& id, const std::string& name) {
+        FirmwareSyncReq req{};
+        {
+            std::lock_guard<std::mutex> lock(status.mutex);
+            firmwareSyncGeneration++;
+            req.generation = firmwareSyncGeneration;
+            req.platformSlug = slug;
+            req.platformId = id;
+            req.platformName = name;
+            status.firmwareBusy.store(true);
+            status.firmwareStatusText = "Syncing firmware for " + name + "...";
+            status.firmwareList.clear();
+        }
+        firmwareSyncJobs.submit(req);
+    };
+
     constexpr const char* kUpdateRepoOwner = "Shalasere";
     constexpr const char* kUpdateRepoName = "SwitchRomM";
     const std::string kUpdateLatestUrl =
@@ -2378,6 +2431,32 @@ int main(int argc, char** argv) {
     diagProbeJobs.start([&](const DiagProbeReq& req) -> DiagProbeResult {
         DiagProbeResult out = runDiagProbe();
         out.generation = req.generation;
+        return out;
+    });
+    firmwareSyncJobs.start([&](const FirmwareSyncReq& req) -> FirmwareSyncResultMsg {
+        FirmwareSyncResultMsg out;
+        out.generation = req.generation;
+        romm::FirmwareSyncResult result;
+        std::string err;
+        std::string progressText;
+        bool ok = romm::syncFirmwareForPlatform(
+            config, req.platformSlug, req.platformId,
+            [&](const std::string& msg) { progressText = msg; },
+            result, err);
+        std::string summary = std::to_string(result.downloaded) + " downloaded, " +
+                              std::to_string(result.skipped) + " skipped, " +
+                              std::to_string(result.failed) + " failed";
+        out.statusText = summary;
+        if (!ok) out.statusText += "  " + (err.empty() ? std::string("(error)") : err);
+        {
+            std::lock_guard<std::mutex> lock(status.mutex);
+            if (req.generation == firmwareSyncGeneration) {
+                status.firmwareStatusText = summary;
+                if (!ok) status.firmwareStatusText += "  " + err;
+                status.firmwareBusy.store(false);
+            }
+        }
+        romm::logLine("FW: sync finished for " + req.platformName + " - " + summary);
         return out;
     });
     updateCheckJobs.start([&](const UpdateCheckReq& req) -> UpdateCheckResult {
@@ -2977,6 +3056,11 @@ int main(int argc, char** argv) {
                     : probe->detail + " (" + romm::errorCodeLabel(probe->errorInfo.code) + ")";
             }
         }
+        if (auto fwDone = firmwareSyncJobs.pollResult()) {
+            // The worker body already posted the final status text and cleared
+            // firmwareBusy under status.mutex; this just consumes the result slot.
+            (void)fwDone;
+        }
         if (auto upd = updateCheckJobs.pollResult()) {
             std::lock_guard<std::mutex> lock(status.mutex);
             if (upd->generation == updateCheckGenSubmitted) {
@@ -3123,17 +3207,48 @@ int main(int argc, char** argv) {
                     scrollHold.nextMs = SDL_GetTicks() + 240;
                     scrollHold.repeats = 0;
                     break;
-                case romm::Action::Down:
+                case romm::Action::Down: {
+                    bool inDiagnostics = false;
+                    std::string fwSlug, fwId, fwName;
+                    {
+                        std::lock_guard<std::mutex> lock(status.mutex);
+                        inDiagnostics = (status.currentView == Status::View::DIAGNOSTICS);
+                        if (inDiagnostics && !status.platforms.empty() &&
+                            status.firmwarePlatformIndex >= 0 &&
+                            status.firmwarePlatformIndex < (int)status.platforms.size()) {
+                            int i = status.firmwarePlatformIndex;
+                            fwSlug = status.platforms[(size_t)i].slug;
+                            fwId = status.platforms[(size_t)i].id;
+                            fwName = status.platforms[(size_t)i].name;
+                        }
+                    }
+                    if (inDiagnostics) {
+                        if (!fwId.empty() && !status.firmwareBusy.exchange(true)) {
+                            submitFirmwareSync(fwSlug, fwId, fwName);
+                            viewChangedThisFrame = true;
+                        } else if (fwId.empty()) {
+                            romm::logLine("FW: no platform selected to sync");
+                        }
+                        break;
+                    }
                     adjustSelection(1);
                     scrollHold.dir = 1;
                     scrollHold.nextMs = SDL_GetTicks() + 240;
                     scrollHold.repeats = 0;
                     break;
+                }
                 case romm::Action::Left: {
                     bool changed = false;
+                    std::string fwName; // for the log line after unlock
                     {
                         std::lock_guard<std::mutex> lock(status.mutex);
-                        if (status.currentView == Status::View::ROMS) {
+                        if (status.currentView == Status::View::DIAGNOSTICS && !status.platforms.empty()) {
+                            status.firmwarePlatformIndex--;
+                            if (status.firmwarePlatformIndex < 0)
+                                status.firmwarePlatformIndex = (int)status.platforms.size() - 1;
+                            fwName = status.platforms[(size_t)status.firmwarePlatformIndex].name;
+                            changed = true;
+                        } else if (status.currentView == Status::View::ROMS) {
                             switch (status.romFilter) {
                                 case romm::RomFilter::All: status.romFilter = romm::RomFilter::Queued; break;
                                 case romm::RomFilter::Queued: status.romFilter = romm::RomFilter::Resumable; break;
@@ -3147,15 +3262,24 @@ int main(int argc, char** argv) {
                         }
                     }
                     if (changed) {
-                        romm::logLine(std::string("ROM filter -> ") + romFilterLabel(status.romFilter));
+                        romm::logLine(fwName.empty()
+                            ? std::string("ROM filter -> ") + romFilterLabel(status.romFilter)
+                            : std::string("FW platform -> ") + fwName);
                     }
                     break;
                 }
                 case romm::Action::Right: {
                     bool changed = false;
+                    std::string fwName;
                     {
                         std::lock_guard<std::mutex> lock(status.mutex);
-                        if (status.currentView == Status::View::ROMS) {
+                        if (status.currentView == Status::View::DIAGNOSTICS && !status.platforms.empty()) {
+                            status.firmwarePlatformIndex++;
+                            if (status.firmwarePlatformIndex >= (int)status.platforms.size())
+                                status.firmwarePlatformIndex = 0;
+                            fwName = status.platforms[(size_t)status.firmwarePlatformIndex].name;
+                            changed = true;
+                        } else if (status.currentView == Status::View::ROMS) {
                             switch (status.romSort) {
                                 case romm::RomSort::TitleAsc: status.romSort = romm::RomSort::TitleDesc; break;
                                 case romm::RomSort::TitleDesc: status.romSort = romm::RomSort::SizeDesc; break;
@@ -3167,7 +3291,9 @@ int main(int argc, char** argv) {
                         }
                     }
                     if (changed) {
-                        romm::logLine(std::string("ROM sort -> ") + romSortLabel(status.romSort));
+                        romm::logLine(fwName.empty()
+                            ? std::string("ROM sort -> ") + romSortLabel(status.romSort)
+                            : std::string("FW platform -> ") + fwName);
                     }
                     break;
                 }
@@ -3791,6 +3917,7 @@ exit_app:
     romFetchJobs.stop();
     remoteSearchJobs.stop();
     diagProbeJobs.stop();
+    firmwareSyncJobs.stop();
     // Stop updater workers explicitly before tearing down sockets/NIFM.
     updateCheckJobs.stop();
     updateDownloadJobs.stop();

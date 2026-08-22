@@ -16,6 +16,7 @@ SOURCES := ../source/api.cpp \
            ../source/config.cpp \
            ../source/layout.cpp \
            ../source/filesystem.cpp \
+           ../source/firmware.cpp \
            ../source/manifest.cpp \
            ../source/http_common.cpp \
            ../source/update.cpp \
@@ -44,6 +45,7 @@ SOURCES := ../source/api.cpp \
            test_queue_store.cpp \
            test_update.cpp \
            test_self_update.cpp \
+           test_firmware.cpp \
            logger_stub.cpp
 
 all: $(TARGET)

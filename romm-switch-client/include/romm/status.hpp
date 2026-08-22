@@ -115,6 +115,12 @@ struct Status {
     uint32_t diagnosticsLastProbeMs{0};
     std::string diagnosticsLastProbeDetail;
 
+    // BIOS/firmware sync state (DIAGNOSTICS view).
+    int firmwarePlatformIndex{0};
+    std::vector<Firmware> firmwareList; // last listed firmware for the selected platform
+    std::string firmwareStatusText;     // last result text ("3 downloaded, 12 skipped, 0 failed", ...)
+    std::atomic<bool> firmwareBusy{false};
+
     // Updater state (GitHub latest release check + staged .nro download)
     bool updateCheckInFlight{false};
     bool updateChecked{false};

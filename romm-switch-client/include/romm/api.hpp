@@ -52,6 +52,26 @@ bool searchGamesRemote(const Config& cfg,
                        ErrorInfo* outInfo = nullptr);
 bool fetchBinary(const Config& cfg, const std::string& url, std::string& outData, std::string& outError, ErrorInfo* outInfo = nullptr);
 bool enrichGameWithFiles(const Config& cfg, Game& g, std::string& outError, ErrorInfo* outInfo = nullptr);
+
+// Fetch the firmware/bios file list for a platform. JSON is either a bare array
+// of firmware objects or an {"items":[...]} envelope.
+bool fetchFirmware(const Config& cfg,
+                   const std::string& platformId,
+                   std::vector<Firmware>& outFirmware,
+                   std::string& outError,
+                   ErrorInfo* outInfo = nullptr);
+
+#ifdef UNIT_TEST
+// Test helper: parse a firmware list body (array or {"items":[...]} envelope).
+bool parseFirmwareListTest(const std::string& body,
+                           std::vector<Firmware>& outFirmware,
+                           std::string& err);
+#endif
+// Exposed for callers that make raw HTTP requests (e.g. firmware streaming): returns the
+// base64 Basic-auth payload ("" when no credentials are configured). Consumers must prefix
+// with "Authorization: Basic " themselves.
+std::string basicAuthHeader(const Config& cfg);
+
 // Shared URL parser (http:// and https://).
 bool parseHttpUrl(const std::string& url,
                   std::string& host,

@@ -750,9 +750,13 @@ bool parseIdentifiersDigestTest(const std::string& body,
 }
 #endif
 
-static std::string buildBasicAuth(const Config& cfg) {
+std::string basicAuthHeader(const Config& cfg) {
     if (cfg.username.empty() && cfg.password.empty()) return {};
     return romm::util::base64Encode(cfg.username + ":" + cfg.password);
+}
+
+static std::string buildBasicAuth(const Config& cfg) {
+    return basicAuthHeader(cfg);
 }
 
 static std::string buildPlatformRomsQuery(const std::string& serverUrl,
@@ -1194,5 +1198,86 @@ bool fetchBinary(const Config& cfg, const std::string& url, std::string& outData
     outData.swap(resp.body);
     return true;
 }
+
+// Accepts a bare JSON array of firmware objects OR an {"items":[...]} envelope.
+// Tolerates missing file_size_bytes (defaults 0) and string-or-number ids.
+static bool parseFirmwareList(const std::string& body, std::vector<Firmware>& out, std::string& err) {
+    mini::Array arr;
+    mini::Object obj;
+    if (!mini::parse(body, arr)) {
+        if (mini::parse(body, obj)) {
+            auto it = obj.find("items");
+            if (it != obj.end() && it->second.type == mini::Value::Type::Array) {
+                arr = it->second.array;
+            } else {
+                err = "Firmware JSON missing items array";
+                return false;
+            }
+        } else {
+            err = "Failed to parse firmware JSON";
+            return false;
+        }
+    }
+
+    out.clear();
+    for (auto& v : arr) {
+        if (v.type != mini::Value::Type::Object) continue;
+        auto& o = v.object;
+        Firmware fw;
+        if (auto it = o.find("id"); it != o.end()) {
+            // id may be a number or a numeric string; tolerate both. Non-numeric ids
+            // (e.g. drive/cartridge identifiers) fall back to 0 (no exceptions under -fno-exceptions).
+            std::string sid = valToString(it->second);
+            if (!sid.empty()) {
+                errno = 0;
+                char* end = nullptr;
+                long long v = std::strtoll(sid.c_str(), &end, 10);
+                if (errno == 0 && end && *end == '\0') {
+                    fw.id = v;
+                }
+            }
+        }
+        if (auto it = o.find("file_name"); it != o.end() && it->second.type == mini::Value::Type::String)
+            fw.fileName = it->second.str;
+        if (auto it = o.find("file_size_bytes"); it != o.end() && it->second.type == mini::Value::Type::Number)
+            fw.fileSizeBytes = static_cast<unsigned long long>(it->second.number);
+        // Skip entries with no usable filename.
+        if (!fw.fileName.empty()) {
+            out.push_back(std::move(fw));
+        }
+    }
+    return true;
+}
+
+bool fetchFirmware(const Config& cfg,
+                   const std::string& platformId,
+                   std::vector<Firmware>& outFirmware,
+                   std::string& outError,
+                   ErrorInfo* outInfo) {
+    if (outInfo) *outInfo = ErrorInfo{};
+    outFirmware.clear();
+    std::string encodedId = romm::util::urlEncode(platformId);
+    std::string url = cfg.serverUrl + "/api/firmware?platform_id=" + encodedId;
+    HttpResponse resp;
+    std::string err;
+    if (!httpGetJsonWithRetry(url, buildBasicAuth(cfg), cfg.httpTimeoutSeconds, resp, err)) {
+        setApiError(outError, outInfo, err, ErrorCategory::Network);
+        return false;
+    }
+    if (!parseFirmwareList(resp.body, outFirmware, err)) {
+        setApiError(outError, outInfo, err, ErrorCategory::Parse);
+        return false;
+    }
+    outError.clear();
+    return true;
+}
+
+#ifdef UNIT_TEST
+bool parseFirmwareListTest(const std::string& body,
+                           std::vector<Firmware>& outFirmware,
+                           std::string& err) {
+    return parseFirmwareList(body, outFirmware, err);
+}
+#endif
 
 } // namespace romm
