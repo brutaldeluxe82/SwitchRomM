@@ -50,6 +50,7 @@ SOURCES := ../source/api.cpp \
            test_firmware.cpp \
            test_md5.cpp \
            test_save_sync.cpp \
+           test_save_sync_engine.cpp \
            logger_stub.cpp
 
 all: $(TARGET)
