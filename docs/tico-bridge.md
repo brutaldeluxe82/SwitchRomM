@@ -46,20 +46,33 @@ RomM platform slugs (IGDB-derived) must be **mapped** to these tico folder names
 they do not match 1:1 everywhere (e.g. RomM may use `megadrive` where tico wants `genesis`).
 A SlugMap table belongs in SwitchRomM's platform_prefs, defaulting to the table above.
 
-## Current state of SwitchRomM (gap analysis for the bridge)
+## Implementation status (2026-08-23)
 
-As of `a322359`, SwitchRomM only downloads ROMs:
-- Endpoints used: `/api/platforms`, `/api/roms?platform_ids=`, `/api/roms/identifiers` (+ content download). 
-- **Not yet used** (needed for full bridge): `/api/firmware` (BIOS into `system/`), `/api/saves` + `/api/states` (sync), multipart upload with `device_id`, `/api/sync/negotiate`.
-- Default download dir is `sdmc:/romm_cache` — must become **`sdmc:/tico/roms`** with platform-slug subfolders for the bridge to work. `Filesystem.cpp`/`downloader.cpp` already group by `<downloadDir>/<platformSlug>/<title_id>/`, so this is a config + slug-map + extraction change, not a rewrite.
-- `.zip` downloads must be extracted to satisfy tico (tico rejects archives). Downloader already stages zips (RomStaging) — needs an unwind step.
-- Auth: currently username/password; RomM 4.7+ device pairing (`/api/auth/device/*`, bearer + `device_id` tag on saves upload) is the path that enables correct per-device save sync.
+The bridge is implemented in SwitchRomM as of `main`:
+
+- **ROM downloads into tico layout**: `output_layout` config key (`tico` default,
+  `retroarch` supported) routes ROMs to `sdmc:/tico/roms/<platform>/` (slug-mapped) or
+  `sdmc:/retroarch/.retroarch/roms/`; zip archives are extracted on arrival.
+- **BIOS**: `/api/firmware` listing + download into `sdmc:/tico/system/<platform>/`
+  (`sdmc:/retroarch/.retroarch/system/` under retroarch layout); triggered from the
+  DIAGNOSTICS view (Up = sync BIOS for the selected platform).
+- **Save/state sync** (saves AND states): device-auth pairing
+  (`/api/auth/device/init`, `/api/auth/device/token`, token persisted at
+  `sdmc:/switch/romm_switch_client/device_token.json`), then per run:
+  scan local saves/states → `/api/sync/negotiate` → multipart uploads
+  (`saveFile`/`stateFile`), binary downloads, `/api/saves/{id}/downloaded` confirm,
+  `/api/sync/sessions/{id}/complete`. Battery saves report `slot:"autosave"` because
+  the server pairs negotiate rows on `(rom_id, slot)`; states are synced client-side
+  (last-writer-wins by `updated_at`, equal timestamps compare content hashes).
+- **UI**: DIAGNOSTICS view — Down = sync saves (pairing first when unpaired, showing
+  the user code while awaiting approval; leaving the view cancels an in-flight pair),
+  Up = sync BIOS, ◀▶ = platform select.
+
 
 ## Alignment verdict
 
-**Feasible now, no tico cooperation required.** tico's ROM/save/state/BIOS layout is fully
-documented and matches RetroArch conventions closely enough that SwitchRomM can populate it.
-The integration is config-level for download location, plus a platform-slug mapping table and
-zip-extraction on the SwitchRomM side. Save/state sync (iteration 2) needs SwitchRomM to add
-the RomM saves/states + negotiate endpoints and read tico's `saves/` and `states/` trees —
-the folder mapping above is the only contract that matters.
+**Implemented.** tico's ROM/save/state/BIOS layout matched RetroArch conventions closely
+enough that SwitchRomM populates it directly (config-level for download location, a
+platform-slug mapping table, zip extraction, and the RomM saves/states + negotiate +
+device-auth endpoints). The folder mapping above remains the only contract that matters;
+SwitchRomM reads back tico's `saves/` and `states/` trees to drive sync.
