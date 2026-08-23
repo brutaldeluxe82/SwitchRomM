@@ -15,6 +15,7 @@ namespace romm {
 enum class QueueState { Pending, Downloading, Finalizing, Completed, Resumable, Failed, Cancelled };
 enum class RomFilter { All, Queued, Resumable, Failed, Completed, NotQueued };
 enum class RomSort { TitleAsc, TitleDesc, SizeDesc, SizeAsc };
+enum class SavePairState { Idle, Initiating, AwaitingApproval, Paired, Error };
 enum class WorkerEventType { DownloadFailureState, DownloadCompletion };
 
 struct QueueItem {
@@ -120,6 +121,18 @@ struct Status {
     std::vector<Firmware> firmwareList; // last listed firmware for the selected platform
     std::string firmwareStatusText;     // last result text ("3 downloaded, 12 skipped, 0 failed", ...)
     std::atomic<bool> firmwareBusy{false};
+
+    // Save-sync (device-auth pairing + sync job) state (DIAGNOSTICS view).
+    // Non-atomic fields are guarded by Status::mutex.
+    SavePairState savePairState{SavePairState::Idle};
+    std::string savePairUserCode;   // shown while awaiting approval
+    std::string savePairDetail;     // error detail / verification URL hint
+    std::string saveVerificationPath; // verification_path from init (or "/pair")
+    std::string saveStatusText;     // last sync result summary
+    std::atomic<bool> saveBusy{false};
+    bool saveServerDeviceAuthKnown{false};
+    bool saveServerDeviceAuthSupported{false};
+    std::string saveServerVersion;  // from heartbeat probe
 
     // Updater state (GitHub latest release check + staged .nro download)
     bool updateCheckInFlight{false};

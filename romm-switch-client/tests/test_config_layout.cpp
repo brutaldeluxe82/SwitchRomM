@@ -57,3 +57,19 @@ TEST_CASE("empty bios_dir derives from layout") {
     cfg.biosDir.clear();
     REQUIRE(romm::effectiveBiosDir(cfg) == "sdmc:/retroarch/system");
 }
+
+TEST_CASE("effectiveSaveDir per layout") {
+    romm::Config cfg;
+    cfg.outputLayout = "tico";
+    REQUIRE(romm::effectiveSaveDir(cfg) == "sdmc:/tico/saves");
+    cfg.outputLayout = "retroarch";
+    REQUIRE(romm::effectiveSaveDir(cfg) == "sdmc:/retroarch/.retroarch/saves");
+}
+
+TEST_CASE("effectiveStatesDir per layout") {
+    romm::Config cfg;
+    cfg.outputLayout = "tico";
+    REQUIRE(romm::effectiveStatesDir(cfg) == "sdmc:/tico/states");
+    cfg.outputLayout = "retroarch";
+    REQUIRE(romm::effectiveStatesDir(cfg) == "sdmc:/retroarch/.retroarch/states");
+}

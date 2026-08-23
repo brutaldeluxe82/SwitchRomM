@@ -21,6 +21,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#include <chrono>
 #include <iomanip>
 #include <cctype>
 #include "stb_image.h"
@@ -52,6 +53,8 @@ extern "C" void stbi_image_free(void *retval_from_stbi_load);
 #include "romm/queue_store.hpp"
 #include "romm/firmware.hpp"
 #include "romm/speed_test.hpp"
+#include "romm/save_sync.hpp"
+#include "mini/json.hpp"
 
 using romm::Status;
 using romm::Config;
@@ -614,6 +617,15 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
         std::vector<romm::Firmware> firmwareList;
         std::string firmwareStatusText;
         bool firmwareBusy{false};
+        romm::SavePairState savePairState{romm::SavePairState::Idle};
+        std::string savePairUserCode;
+        std::string savePairDetail;
+        std::string saveVerificationPath;
+        std::string saveStatusText;
+        bool saveBusy{false};
+        bool saveServerDeviceAuthKnown{false};
+        bool saveServerDeviceAuthSupported{false};
+        std::string saveServerVersion;
         bool updateCheckInFlight{false};
         bool updateChecked{false};
         bool updateAvailable{false};
@@ -688,6 +700,15 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
         snap.firmwareList = status.firmwareList;
         snap.firmwareStatusText = status.firmwareStatusText;
         snap.firmwareBusy = status.firmwareBusy.load();
+        snap.savePairState = status.savePairState;
+        snap.savePairUserCode = status.savePairUserCode;
+        snap.savePairDetail = status.savePairDetail;
+        snap.saveVerificationPath = status.saveVerificationPath;
+        snap.saveStatusText = status.saveStatusText;
+        snap.saveBusy = status.saveBusy.load();
+        snap.saveServerDeviceAuthKnown = status.saveServerDeviceAuthKnown;
+        snap.saveServerDeviceAuthSupported = status.saveServerDeviceAuthSupported;
+        snap.saveServerVersion = status.saveServerVersion;
         snap.updateCheckInFlight = status.updateCheckInFlight;
         snap.updateChecked = status.updateChecked;
         snap.updateAvailable = status.updateAvailable;
@@ -1481,7 +1502,7 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
         header = "DIAGNOSTICS";
         SDL_Color fg{255,255,255,255};
         SDL_Color sub{210,240,220,255};
-        SDL_Rect box{64, 96, 1280 - 128, 720 - 96 - 64 - 48};
+        SDL_Rect box{64, 56, 1280 - 128, 668 - 56};
         SDL_SetRenderDrawColor(renderer, 10, 60, 28, 220);
         SDL_RenderFillRect(renderer, &box);
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 90);
@@ -1527,6 +1548,34 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
         if (fwStatus.empty()) fwStatus = "(not synced yet)";
         drawText(renderer, box.x + 16, y, ellipsize(fwStatus, 62), sub, 2); y += 30;
 
+        drawText(renderer, box.x + 16, y, "Save Sync", fg, 2); y += 26;
+        std::string ssState;
+        switch (snap.savePairState) {
+            case romm::SavePairState::Idle: ssState = "(not paired)"; break;
+            case romm::SavePairState::Initiating: ssState = "Pairing..."; break;
+            case romm::SavePairState::AwaitingApproval:
+                ssState = "Enter code: " + snap.savePairUserCode;
+                if (!snap.saveVerificationPath.empty())
+                    ssState += " at " + ellipsize(snap.saveVerificationPath, 24);
+                break;
+            case romm::SavePairState::Paired: ssState = "Paired"; break;
+            case romm::SavePairState::Error:
+                ssState = "Error: " + ellipsize(snap.savePairDetail, 46);
+                break;
+        }
+        drawText(renderer, box.x + 16, y, ellipsize(ssState, 66),
+                 snap.saveBusy ? SDL_Color{255,210,160,255} : sub, 2); y += 24;
+        if (snap.saveServerDeviceAuthKnown) {
+            std::string devLine = std::string("Device auth: ") +
+                                  (snap.saveServerDeviceAuthSupported ? "yes" : "no");
+            if (!snap.saveServerVersion.empty()) devLine += " (v" + snap.saveServerVersion + ")";
+            drawText(renderer, box.x + 16, y, ellipsize(devLine, 62), sub, 2); y += 24;
+        }
+        std::string ssStatus = snap.saveBusy ? "(syncing...)" : snap.saveStatusText;
+        if (ssStatus.empty()) ssStatus = "(not synced yet)";
+        drawText(renderer, box.x + 16, y, ellipsize(ssStatus, 66),
+                 snap.saveBusy ? SDL_Color{255,210,160,255} : sub, 2); y += 30;
+
         drawText(renderer, box.x + 16, y, "Queue", fg, 2); y += 26;
         drawText(renderer, box.x + 16, y,
                  "Active: " + std::to_string(snap.queueCount) +
@@ -1539,11 +1588,11 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
                               " / " + romm::errorCodeLabel(snap.lastErrorInfo.code);
         drawText(renderer, box.x + 16, y, errHead, sub, 2); y += 24;
         drawText(renderer, box.x + 16, y, ellipsize(snap.lastError.empty() ? "(none)" : snap.lastError, 64), sub, 2); y += 24;
-        drawText(renderer, box.x + 16, box.y + box.h - 78,
+        drawText(renderer, box.x + 16, box.y + box.h - 58,
                  "A=export summary to log  B=back  R=refresh probe",
                  fg, 2);
-        drawText(renderer, box.x + 16, box.y + box.h - 50,
-                 "\xE2\x97\x80\xE2\x96\xB6 platform  \xE2\x96\xBC sync BIOS",
+        drawText(renderer, box.x + 16, box.y + box.h - 30,
+                 "\xE2\x97\x80\xE2\x96\xB6 platform  \xE2\x96\xBC sync saves  \xE2\x96\xB2 sync BIOS",
                  fg, 2);
     } else if (snap.view == Status::View::UPDATER) {
         header = "UPDATER";
@@ -1727,7 +1776,7 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
             controls = "B=exit Plus=exit";
             break;
         case Status::View::DIAGNOSTICS:
-            controls = "A=export summary B=back R=refresh Plus=exit";
+            controls = "A=export summary  B=back  R=refresh  \xE2\x97\x80\xE2\x96\xB6 platform  \xE2\x96\xBC sync saves  \xE2\x96\xB2 sync BIOS";
             break;
         case Status::View::UPDATER:
             controls = "A=check X=download B=back Plus=exit";
@@ -1968,6 +2017,24 @@ int main(int argc, char** argv) {
         uint64_t generation{0};
         std::string statusText;
     };
+    struct SaveSyncReq {
+        uint64_t generation{0};
+        bool pair{false};          // true = run device-auth pairing before syncing
+        std::string serverUrl;
+        std::string basicAuthRaw;  // "" when no credentials configured
+        std::string savesRoot;
+        std::string statesRoot;
+        std::string deviceId;      // from a reused token ("" when pairing fresh)
+        std::string accessToken;   // bearer token ("" when pairing fresh)
+        std::string clientDeviceId; // stable per-install id (used when pairing fresh)
+        int timeoutSeconds{0};
+        std::vector<romm::RomMatchEntry> roms; // snapshot of status.romsAll for matching
+    };
+    struct SaveSyncResultMsg {
+        uint64_t generation{0};
+        bool paired{false};        // true when we reached the Paired state
+        std::string statusText;    // sync summary or error detail
+    };
     romm::LatestJobWorker<PendingRomFetch, RomFetchResult> romFetchJobs;
     romm::LatestJobWorker<PendingRemoteSearch, RemoteSearchResult> remoteSearchJobs;
     romm::LatestJobWorker<DiagProbeReq, DiagProbeResult> diagProbeJobs;
@@ -1975,6 +2042,9 @@ int main(int argc, char** argv) {
     romm::LatestJobWorker<UpdateDownloadReq, UpdateDownloadResult> updateDownloadJobs;
     romm::LatestJobWorker<FirmwareSyncReq, FirmwareSyncResultMsg> firmwareSyncJobs;
     uint64_t firmwareSyncGeneration = 0;
+    romm::LatestJobWorker<SaveSyncReq, SaveSyncResultMsg> saveSyncJobs;
+    uint64_t saveSyncGeneration = 0;
+    std::atomic<bool> saveCancel{false};
     uint64_t updateGeneration = 0;
     uint64_t updateCheckGenSubmitted = 0;
     uint64_t updateDownloadGenSubmitted = 0;
@@ -2374,6 +2444,249 @@ int main(int argc, char** argv) {
         firmwareSyncJobs.submit(req);
     };
 
+    // ---- Save sync: pairing + sync job ----
+    // Down in DIAGNOSTICS toggles between pairing (pair-or-sync) and a full
+    // sync, depending on whether a usable device token is already on disk.
+    auto saveLowerAscii = [](std::string s) {
+        for (char& c : s)
+            if (c >= 'A' && c <= 'Z') c = (char)(c + 'a' - 'A');
+        return s;
+    };
+    auto saveMakeDeviceId = [&]() {
+        uint64_t a = std::chrono::steady_clock::now().time_since_epoch().count();
+        uint64_t b = ((uint64_t)SDL_GetTicks() * 2654435761u) ^ (uint64_t)(uintptr_t)&status;
+        char buf[17];
+        snprintf(buf, sizeof(buf), "%08x%08x", (uint32_t)(a ^ (b >> 32)), (uint32_t)b);
+        return std::string(buf);
+    };
+
+    auto postSaveStatus = [&](const SaveSyncReq& req, std::function<void()> fn) {
+        std::lock_guard<std::mutex> lock(status.mutex);
+        if (req.generation == saveSyncGeneration) fn();
+    };
+
+    auto submitSaveAction = [&]() {
+        SaveSyncReq req{};
+        bool shouldSubmit = false;
+        romm::DeviceToken token;
+        const bool haveToken = romm::loadDeviceToken(romm::kDeviceTokenPath, token);
+        {
+            std::lock_guard<std::mutex> lock(status.mutex);
+            if (status.saveBusy.load()) {
+                romm::logLine("SAVE: already busy, ignoring Down");
+                return;
+            }
+            saveCancel.store(false);
+            saveSyncGeneration++;
+            req.generation = saveSyncGeneration;
+            req.serverUrl = config.serverUrl;
+            req.basicAuthRaw = romm::basicAuthHeader(config);
+            req.savesRoot = romm::effectiveSaveDir(config);
+            req.statesRoot = romm::effectiveStatesDir(config);
+            req.timeoutSeconds = config.httpTimeoutSeconds;
+
+            req.roms.clear();
+            for (const auto& g : status.romsAll) {
+                // Game.id is a string; parse it as a decimal id without exceptions
+                // (-fno-exceptions) and skip non-numeric ids.
+                const std::string& gid = g.id;
+                long long rid = 0;
+                bool ok = !gid.empty();
+                for (char c : gid) {
+                    if (c < '0' || c > '9') { ok = false; break; }
+                    rid = rid * 10 + (long long)(c - '0');
+                }
+                if (!ok || rid <= 0) continue;
+                req.roms.push_back({rid, saveLowerAscii(g.fsName), saveLowerAscii(g.platformSlug)});
+            }
+
+            if (haveToken) {
+                // Already paired (or a token is on disk): go straight to sync.
+                req.pair = false;
+                req.deviceId = token.deviceId;
+                req.accessToken = token.accessToken;
+                req.clientDeviceId = token.clientDeviceIdentifier;
+                status.savePairState = romm::SavePairState::Paired;
+                status.savePairDetail.clear();
+                status.saveStatusText = "Syncing saves...";
+                status.saveBusy.store(true);
+                shouldSubmit = true;
+            } else {
+                // Fresh pairing: heartbeat gate -> init -> poll -> sync.
+                req.pair = true;
+                req.clientDeviceId = saveMakeDeviceId();
+                status.savePairState = romm::SavePairState::Initiating;
+                status.savePairDetail.clear();
+                status.saveStatusText = "Pairing...";
+                status.saveBusy.store(true);
+                shouldSubmit = true;
+            }
+        }
+        if (shouldSubmit) saveSyncJobs.submit(req);
+    };
+
+    // Run the sync phase (scan -> negotiate -> execute ops). Shared by the
+    // pairing path (after approval) and the already-paired path.
+    auto runSaveSyncPhase = [&](const SaveSyncReq& req, const std::string& deviceId,
+                                const std::string& accessToken, SaveSyncResultMsg& out,
+                                bool& failedOut) {
+        failedOut = false;
+        romm::SyncAuthCtx ctx;
+        ctx.baseUrl = req.serverUrl;
+        ctx.bearerTokenOrEmpty = accessToken;
+        ctx.basicAuthRawOrEmpty = accessToken.empty() ? req.basicAuthRaw : std::string();
+        ctx.timeoutSeconds = req.timeoutSeconds;
+
+        auto matcher = [&](const std::string& baseLower, const std::string& slugHint) -> int {
+            return (int)romm::romIdForMatch(req.roms, baseLower, slugHint);
+        };
+        auto emulatorOf = [&](const std::string& path) -> std::string {
+            auto dirUnder = [&](const std::string& root) -> std::string {
+                if (root.empty()) return "";
+                std::string r = root;
+                if (r.back() == '/') r.pop_back();
+                if (path.rfind(r + "/", 0) != 0) return "";
+                std::string rest = path.substr(r.size() + 1);
+                size_t slash = rest.find('/');
+                if (slash == std::string::npos) return "";
+                return rest.substr(0, slash);
+            };
+            std::string e = dirUnder(req.savesRoot);
+            if (!e.empty()) return e;
+            return dirUnder(req.statesRoot);
+        };
+
+        std::string err;
+        romm::ScanResult scan = romm::scanAssets(req.savesRoot, req.statesRoot, matcher, emulatorOf, err);
+        std::vector<romm::LocalAsset> matched;
+        for (const auto& a : scan.assets) {
+            if (a.romId > 0) matched.push_back(a);
+        }
+
+        if (saveCancel.load()) {
+            failedOut = true;
+            out.paired = true;
+            out.statusText = "cancelled";
+            return;
+        }
+
+        romm::NegotiateResponse resp;
+        if (!romm::negotiateSync(ctx, deviceId, matched, resp, err)) {
+            failedOut = true;
+            out.paired = true;
+            out.statusText = "negotiate failed: " + err;
+            return;
+        }
+
+        auto findLocalAsset = [&](long long romId, const std::string& fileName) -> romm::LocalAsset* {
+            for (auto& a : scan.assets) {
+                if (a.romId == romId && a.fileName == fileName) return &a;
+            }
+            return nullptr;
+        };
+
+        int uploaded = 0, downloaded = 0, conflicts = 0, noOp = 0, failedOps = 0;
+        size_t n = resp.operations.size();
+        for (size_t i = 0; i < n; ++i) {
+            if (saveCancel.load()) {
+                failedOut = true;
+                break;
+            }
+            const romm::SyncOperation& op = resp.operations[i];
+            std::string progress = op.action + " (" + std::to_string(i + 1) + "/" + std::to_string(n) + ")";
+            postSaveStatus(req, [&] { status.saveStatusText = progress; });
+
+            if (op.action == "no_op") {
+                ++noOp;
+                continue;
+            }
+            if (op.action == "conflict") {
+                ++conflicts; // counted separately (not failed) per design
+                continue;
+            }
+            if (op.action == "upload") {
+                romm::LocalAsset* asset = findLocalAsset(op.romId, op.fileName);
+                if (!asset) {
+                    ++failedOps;
+                    continue;
+                }
+                bool okOp = false;
+                std::string opErr;
+                if (asset->isState) {
+                    if (op.hasAssetId) {
+                        okOp = romm::updateExistingState(ctx, op.assetId, asset->path, opErr);
+                    } else {
+                        okOp = romm::uploadNewState(ctx, (long long)asset->romId, asset->emulator, asset->path, opErr);
+                    }
+                } else {
+                    if (op.hasAssetId) {
+                        okOp = romm::updateExistingSave(ctx, op.assetId, deviceId, asset->path, opErr);
+                    } else {
+                        okOp = romm::uploadNewSave(ctx, (long long)asset->romId, asset->slot, asset->emulator,
+                                                   deviceId, resp.sessionId, asset->path, false, opErr);
+                        if (!okOp) {
+                            okOp = romm::uploadNewSave(ctx, (long long)asset->romId, asset->slot, asset->emulator,
+                                                       deviceId, resp.sessionId, asset->path, true, opErr);
+                        }
+                    }
+                }
+                if (okOp) ++uploaded; else ++failedOps;
+                continue;
+            }
+            if (op.action == "download") {
+                bool isState = romm::classifyStateFileName(op.fileName) != romm::StateKind::None;
+                const char* kind = isState ? "states" : "saves";
+                std::string bytes;
+                std::string opErr;
+                if (!romm::downloadAssetContent(ctx, kind, op.assetId, deviceId, bytes, opErr)) {
+                    ++failedOps;
+                    continue;
+                }
+                std::string root = isState ? req.statesRoot : req.savesRoot;
+                std::string dir = root;
+                if (!dir.empty() && dir.back() == '/') dir.pop_back();
+                if (!op.emulator.empty()) dir += "/" + op.emulator;
+                std::string outPath = dir + "/" + op.fileName;
+                {
+                    std::error_code ec;
+                    std::filesystem::create_directories(std::filesystem::path(outPath).parent_path(), ec);
+                }
+                std::FILE* f = std::fopen(outPath.c_str(), "wb");
+                if (!f) { ++failedOps; continue; }
+                std::fwrite(bytes.data(), 1, bytes.size(), f);
+                std::fclose(f);
+                if (!isState) {
+                    std::string confirmErr;
+                    (void)romm::confirmSaveDownloaded(ctx, op.assetId, deviceId, confirmErr);
+                }
+                ++downloaded;
+                continue;
+            }
+            // Unknown action -> counted as failed.
+            ++failedOps;
+        }
+
+        // Best-effort session completion.
+        {
+            std::string compErr;
+            int completed = uploaded + downloaded + noOp;
+            (void)romm::completeSyncSession(ctx, resp.sessionId, completed, failedOps, compErr);
+        }
+
+        std::string summary = romm::formatSaveSyncSummary(uploaded, downloaded, conflicts, noOp,
+                                                          failedOps, (int)scan.unmatched.size());
+        if (failedOut || failedOps > 0) summary += "  (some ops failed)";
+        out.paired = true;
+        out.statusText = summary;
+        postSaveStatus(req, [&] {
+            status.saveStatusText = summary;
+            status.savePairState = romm::SavePairState::Paired;
+            status.savePairDetail.clear();
+            status.saveBusy.store(false);
+        });
+        romm::logLine("SAVE: sync finished - " + summary);
+    };
+
     constexpr const char* kUpdateRepoOwner = "Shalasere";
     constexpr const char* kUpdateRepoName = "SwitchRomM";
     const std::string kUpdateLatestUrl =
@@ -2457,6 +2770,200 @@ int main(int argc, char** argv) {
             }
         }
         romm::logLine("FW: sync finished for " + req.platformName + " - " + summary);
+        return out;
+    });
+    saveSyncJobs.start([&](const SaveSyncReq& req) -> SaveSyncResultMsg {
+        SaveSyncResultMsg out;
+        out.generation = req.generation;
+
+        std::string deviceId = req.deviceId;
+        std::string accessToken = req.accessToken;
+
+        // --- Pairing phase (only when a fresh pair was requested) ---
+        if (req.pair) {
+            std::string authRaw = req.basicAuthRaw;
+            auto doRequest = [&](const std::string& method, const std::string& url,
+                                 const std::vector<std::pair<std::string, std::string>>& headers,
+                                 const void* body, size_t bodySize,
+                                 std::string& bodyOut, std::string& err) -> long {
+                err.clear();
+                romm::HttpRequestOptions opt;
+                opt.timeoutSec = (req.timeoutSeconds > 0) ? req.timeoutSeconds : 20;
+                opt.keepAlive = false;
+                opt.decodeChunked = true;
+                opt.requestBody = body;
+                opt.requestBodySize = bodySize;
+                romm::HttpTransaction tx;
+                if (!romm::httpRequestBuffered(method, url, headers, opt, tx, err)) return -1;
+                bodyOut = tx.body;
+                return (long)tx.parsed.statusCode;
+            };
+            auto sleepCancellable = [&](long ms) -> bool {
+                while (ms > 0) {
+                    if (saveCancel.load()) return false;
+                    long step = ms > 250 ? 250 : ms;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(step));
+                    ms -= step;
+                }
+                return true;
+            };
+            auto postPairError = [&](const std::string& detail) {
+                out.paired = false;
+                out.statusText = detail;
+                postSaveStatus(req, [&] {
+                    status.savePairState = romm::SavePairState::Error;
+                    status.savePairDetail = detail;
+                    status.saveStatusText = detail;
+                    status.saveBusy.store(false);
+                });
+                romm::logLine("SAVE: " + detail);
+            };
+
+            // 1. Heartbeat version gate.
+            {
+                std::string url = req.serverUrl + "/api/heartbeat";
+                std::vector<std::pair<std::string, std::string>> headers;
+                if (!authRaw.empty()) headers.emplace_back("Authorization", "Basic " + authRaw);
+                std::string body;
+                std::string err;
+                long code = doRequest("GET", url, headers, nullptr, 0, body, err);
+                std::string version;
+                if (code >= 200 && code < 300) {
+                    mini::Object obj;
+                    if (mini::parse(body, obj)) {
+                        auto sys = obj.find("SYSTEM");
+                        if (sys != obj.end() && sys->second.type == mini::Value::Type::Object) {
+                            auto v = sys->second.object.find("VERSION");
+                            if (v != sys->second.object.end() && v->second.type == mini::Value::Type::String)
+                                version = v->second.str;
+                        }
+                    }
+                }
+                const bool supported = romm::serverSupportsDeviceAuth(version);
+                postSaveStatus(req, [&] {
+                    status.saveServerDeviceAuthKnown = !version.empty();
+                    status.saveServerDeviceAuthSupported = supported;
+                    status.saveServerVersion = version;
+                });
+                if (!version.empty() && !supported) {
+                    postPairError("server " + version + " lacks device auth (needs RomM 5+)");
+                    return out;
+                }
+                if (code < 200 || code >= 300) {
+                    // Heartbeat unreachable but version unknown: still attempt init
+                    // so the server can authoritatively reject us.
+                    romm::logLine("SAVE: heartbeat failed (" + err + "), attempting init anyway");
+                }
+            }
+
+            // 2. Init.
+            if (saveCancel.load()) { postPairError("Pairing cancelled"); return out; }
+            {
+                romm::DeviceAuthInitRequest initReq;
+                initReq.name = "Switch";
+                initReq.client = "SwitchRomM";
+                initReq.clientVersion = romm::appVersion();
+                initReq.clientDeviceIdentifier = req.clientDeviceId;
+                std::string payload = romm::serializeDeviceAuthInitBody(initReq);
+                std::string url = req.serverUrl + "/api/auth/device/init";
+                std::vector<std::pair<std::string, std::string>> headers;
+                headers.emplace_back("Content-Type", "application/json");
+                if (!authRaw.empty()) headers.emplace_back("Authorization", "Basic " + authRaw);
+                std::string body;
+                std::string err;
+                long code = doRequest("POST", url, headers, payload.data(), payload.size(), body, err);
+                if (code < 200 || code >= 300) {
+                    postPairError("init failed: " + (err.empty() ? std::to_string(code) : err));
+                    return out;
+                }
+                romm::DeviceAuthInitResponse initResp;
+                if (!romm::parseDeviceAuthInitResponse(body, initResp)) {
+                    postPairError("init response unparsable");
+                    return out;
+                }
+                long interval = initResp.interval >= 3 ? initResp.interval : 3;
+                std::string userCode = initResp.userCode;
+                std::string verifyPath = initResp.verificationPathComplete
+                    ? (initResp.verificationPath.empty() ? std::string("/pair") : initResp.verificationPath)
+                    : std::string("/pair");
+                postSaveStatus(req, [&] {
+                    status.savePairState = romm::SavePairState::AwaitingApproval;
+                    status.savePairUserCode = userCode;
+                    status.saveVerificationPath = verifyPath;
+                    status.saveStatusText = "Awaiting approval...";
+                });
+                romm::logLine("SAVE: awaiting approval, enter code " + userCode + " at " + verifyPath);
+
+                // 3. Poll device-token endpoint until approved/denied/expired.
+                auto deadline = std::chrono::steady_clock::now() +
+                                std::chrono::seconds(initResp.expiresIn > 0 ? initResp.expiresIn : 600);
+                for (;;) {
+                    if (saveCancel.load()) { postPairError("Pairing cancelled"); return out; }
+                    if (std::chrono::steady_clock::now() >= deadline) {
+                        postPairError("Pairing expired (please retry)");
+                        return out;
+                    }
+                    if (!sleepCancellable(interval * 1000)) {
+                        postPairError("Pairing cancelled");
+                        return out;
+                    }
+                    if (saveCancel.load()) { postPairError("Pairing cancelled"); return out; }
+
+                    std::string pollPayload = "{\"device_code\":\"" + initResp.deviceCode + "\"}";
+                    std::vector<std::pair<std::string, std::string>> pollHeaders;
+                    pollHeaders.emplace_back("Content-Type", "application/json");
+                    if (!authRaw.empty()) pollHeaders.emplace_back("Authorization", "Basic " + authRaw);
+                    std::string pollUrl = req.serverUrl + "/api/auth/device/token";
+                    std::string pollBody;
+                    std::string pollErr;
+                    long pollCode = doRequest("POST", pollUrl, pollHeaders,
+                                              pollPayload.data(), pollPayload.size(), pollBody, pollErr);
+                    romm::DeviceAuthPollResult pr = romm::classifyDeviceTokenResponse(pollCode, pollBody);
+                    switch (pr.state) {
+                        case romm::DeviceAuthPollState::Approved:
+                            accessToken = pr.accessToken;
+                            deviceId = pr.deviceId;
+                            {
+                                romm::DeviceToken tok;
+                                tok.accessToken = pr.accessToken;
+                                tok.deviceId = pr.deviceId;
+                                tok.clientDeviceIdentifier = req.clientDeviceId;
+                                std::string saveErr;
+                                if (!romm::saveDeviceToken(romm::kDeviceTokenPath, tok, saveErr))
+                                    romm::logLine("SAVE: warning - could not persist token: " + saveErr);
+                                postSaveStatus(req, [&] {
+                                    status.savePairState = romm::SavePairState::Paired;
+                                    status.savePairUserCode.clear();
+                                    status.saveVerificationPath.clear();
+                                    status.saveStatusText = "Paired - syncing saves...";
+                                });
+                                romm::logLine("SAVE: paired (device id " + deviceId + ")");
+                            }
+                            break; // exit poll loop -> fall through to sync
+                        case romm::DeviceAuthPollState::Pending:
+                            break;
+                        case romm::DeviceAuthPollState::SlowDown:
+                            interval += 5;
+                            break;
+                        case romm::DeviceAuthPollState::AccessDenied:
+                            postPairError("Pairing denied");
+                            return out;
+                        case romm::DeviceAuthPollState::ExpiredToken:
+                            postPairError("Pairing code expired");
+                            return out;
+                        case romm::DeviceAuthPollState::Error:
+                        default:
+                            postPairError("Pairing error: " + (pollErr.empty() ? std::string("server error") : pollErr));
+                            return out;
+                    }
+                    if (!accessToken.empty()) break; // approved
+                }
+            }
+        }
+
+        // --- Sync phase ---
+        bool failed = false;
+        runSaveSyncPhase(req, deviceId, accessToken, out, failed);
         return out;
     });
     updateCheckJobs.start([&](const UpdateCheckReq& req) -> UpdateCheckResult {
@@ -3061,6 +3568,11 @@ int main(int argc, char** argv) {
             // firmwareBusy under status.mutex; this just consumes the result slot.
             (void)fwDone;
         }
+        if (auto saveDone = saveSyncJobs.pollResult()) {
+            // The worker body already posted the final status text and cleared
+            // saveBusy under status.mutex; this just consumes the result slot.
+            (void)saveDone;
+        }
         if (auto upd = updateCheckJobs.pollResult()) {
             std::lock_guard<std::mutex> lock(status.mutex);
             if (upd->generation == updateCheckGenSubmitted) {
@@ -3199,15 +3711,12 @@ int main(int argc, char** argv) {
             switch (act) {
                 case romm::Action::Quit:
                     running = false;
+                    saveCancel.store(true);
                     romm::stopDownloadWorker();
                     break;
-                case romm::Action::Up:
-                    adjustSelection(-1);
-                    scrollHold.dir = -1;
-                    scrollHold.nextMs = SDL_GetTicks() + 240;
-                    scrollHold.repeats = 0;
-                    break;
-                case romm::Action::Down: {
+                case romm::Action::Up: {
+                    // Up in DIAGNOSTICS triggers a firmware (BIOS) sync for the
+                    // currently selected platform.
                     bool inDiagnostics = false;
                     std::string fwSlug, fwId, fwName;
                     {
@@ -3229,6 +3738,23 @@ int main(int argc, char** argv) {
                         } else if (fwId.empty()) {
                             romm::logLine("FW: no platform selected to sync");
                         }
+                        break;
+                    }
+                    adjustSelection(-1);
+                    scrollHold.dir = -1;
+                    scrollHold.nextMs = SDL_GetTicks() + 240;
+                    scrollHold.repeats = 0;
+                    break;
+                }
+                case romm::Action::Down: {
+                    // Down in DIAGNOSTICS triggers save sync (pair-or-sync).
+                    bool inDiagnostics = false;
+                    {
+                        std::lock_guard<std::mutex> lock(status.mutex);
+                        inDiagnostics = (status.currentView == Status::View::DIAGNOSTICS);
+                    }
+                    if (inDiagnostics) {
+                        submitSaveAction();
                         break;
                     }
                     adjustSelection(1);
@@ -3759,6 +4285,8 @@ int main(int argc, char** argv) {
                         } else if (cur == Status::View::PLATFORMS) {
                             romm::logLine("Back on PLATFORMS ignored.");
                         } else if (cur == Status::View::DIAGNOSTICS) {
+                            // Leaving DIAGNOSTICS aborts any in-flight pair/sync job.
+                            saveCancel.store(true);
                             status.currentView = status.prevDiagnosticsView;
                             gViewTraceFrames = 8;
                             romm::logLine(std::string("Back from DIAGNOSTICS to ") + viewName(status.currentView) + ".");
@@ -3780,6 +4308,7 @@ int main(int argc, char** argv) {
                     // Only update prevQueueView if we're not already in QUEUE
                     {
                         std::lock_guard<std::mutex> lock(status.mutex);
+                        if (status.currentView == Status::View::DIAGNOSTICS) saveCancel.store(true);
                         if (status.currentView != Status::View::QUEUE &&
                             status.currentView != Status::View::DOWNLOADING) { // keep last real view (plat/roms/detail)
                             status.prevQueueView = status.currentView;
@@ -3918,6 +4447,8 @@ exit_app:
     remoteSearchJobs.stop();
     diagProbeJobs.stop();
     firmwareSyncJobs.stop();
+    saveCancel.store(true);
+    saveSyncJobs.stop();
     // Stop updater workers explicitly before tearing down sockets/NIFM.
     updateCheckJobs.stop();
     updateDownloadJobs.stop();

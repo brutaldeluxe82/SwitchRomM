@@ -119,6 +119,23 @@ struct LocalAsset {
 // e.g. "game.gba" -> "game"; "Zelda (USA)" -> "Zelda (USA)"; "game.v1)" unchanged.
 std::string saveLookupBase(const std::string& fileNameNoExt);
 
+// A single server ROM usable for matching scanned saves. fsNameLower is the
+// lowercased ROM file name (including its extension); slugLower the lowercased
+// platform slug ("" when unknown). romId is the numeric server id.
+struct RomMatchEntry {
+    long long romId{0};
+    std::string fsNameLower;
+    std::string slugLower;
+};
+
+// Look up the best romId for a scanned save given its lookup base (as produced
+// by scanAssets: lowercased, double-extension-stripped) and an optional slug
+// hint. Compares against each ROM's own lookup base (saveLookupBase applied to
+// fsNameLower). When slugHint is non-empty a same-slug match is preferred.
+// Returns 0 when nothing matches.
+long long romIdForMatch(const std::vector<RomMatchEntry>& roms,
+                        const std::string& baseLower, const std::string& slugHint);
+
 // Decide a save-state sync action given whether a local asset exists and the
 // remote's metadata. Returns "upload" | "download" | "no_op" | "skip".
 //   no local + remote present            -> "download"
@@ -202,6 +219,12 @@ bool parseNegotiateResponse(const std::string& json, NegotiateResponse& out);
 
 // Serialize the session-complete body: {"operations_completed":n,"operations_failed":n}
 std::string serializeSyncCompleteBody(int completed, int failed);
+
+// Format a sync completion summary line, e.g.
+//   "U:3 D:1 C:2 N:0 F:1"  -> plus " (4 unmatched)" when unmatched > 0.
+// Empty action counts are still shown so each run reports all categories.
+std::string formatSaveSyncSummary(int uploaded, int downloaded, int conflicts,
+                                  int noOp, int failed, int unmatched);
 
 // ---------- Multipart + high-level wire ops (thin) ----------
 

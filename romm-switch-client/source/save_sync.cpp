@@ -374,6 +374,19 @@ std::string saveLookupBase(const std::string& fileNameNoExt) {
     return fileNameNoExt;
 }
 
+long long romIdForMatch(const std::vector<RomMatchEntry>& roms,
+                        const std::string& baseLower, const std::string& slugHint) {
+    const std::string hint = lowerASCII(slugHint);
+    long long fallback = 0;
+    for (const auto& e : roms) {
+        std::string romBase = lowerASCII(saveLookupBase(e.fsNameLower));
+        if (romBase != baseLower) continue;
+        if (fallback == 0) fallback = e.romId;
+        if (!hint.empty() && hint == e.slugLower) return e.romId; // preferred same-slug match
+    }
+    return fallback;
+}
+
 std::string decideStateOperation(const LocalAsset* local, const std::string& remoteUpdatedAt,
                                  const std::string& remoteContentHash,
                                  const std::string& computedLocalHash) {
@@ -617,6 +630,15 @@ bool parseNegotiateResponse(const std::string& json, NegotiateResponse& out) {
 std::string serializeSyncCompleteBody(int completed, int failed) {
     std::ostringstream os;
     os << "{\"operations_completed\":" << completed << ",\"operations_failed\":" << failed << "}";
+    return os.str();
+}
+
+std::string formatSaveSyncSummary(int uploaded, int downloaded, int conflicts,
+                                  int noOp, int failed, int unmatched) {
+    std::ostringstream os;
+    os << "U:" << uploaded << " D:" << downloaded << " C:" << conflicts
+       << " N:" << noOp << " F:" << failed;
+    if (unmatched > 0) os << " (" << unmatched << " unmatched)";
     return os.str();
 }
 

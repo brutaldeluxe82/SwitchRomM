@@ -52,6 +52,22 @@ inline std::string effectiveBiosDir(const Config& c) {
     return c.biosDir.empty() ? defaultBiosDir(layout) : c.biosDir;
 }
 
+// Effective battery-save root for a config (no per-config override today):
+//   tico: "sdmc:/tico/saves"; retroarch: "sdmc:/retroarch/.retroarch/saves".
+inline std::string effectiveSaveDir(const Config& c) {
+    OutputLayout layout = parseOutputLayout(c.outputLayout);
+    if (layout == OutputLayout::RetroArch) return "sdmc:/retroarch/.retroarch/saves";
+    return "sdmc:/tico/saves";
+}
+
+// Effective save-state root for a config:
+//   tico: "sdmc:/tico/states"; retroarch: "sdmc:/retroarch/.retroarch/states".
+inline std::string effectiveStatesDir(const Config& c) {
+    OutputLayout layout = parseOutputLayout(c.outputLayout);
+    if (layout == OutputLayout::RetroArch) return "sdmc:/retroarch/.retroarch/states";
+    return "sdmc:/tico/states";
+}
+
 bool loadConfig(Config& outCfg, std::string& outError, ErrorInfo* outInfo = nullptr);
 
 #ifdef UNIT_TEST

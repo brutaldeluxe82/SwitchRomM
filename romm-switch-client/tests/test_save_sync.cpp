@@ -174,3 +174,52 @@ TEST_CASE("load missing file -> false") {
     romm::DeviceToken out;
     REQUIRE_FALSE(romm::loadDeviceToken("/tmp/definitely_not_present_token.json", out));
 }
+
+// ---------- romIdForMatch ----------
+
+static const std::vector<romm::RomMatchEntry> kTestRoms{
+    {11, "zelda (usa).gba", "gba"},
+    {12, "zelda (usa).gbc", "gbc"},
+    {13, "mario.gba", "gba"},
+    {14, "subdir/game.sfc", ""},
+};
+
+TEST_CASE("romIdForMatch matches by lookup base (extension-insensitive)") {
+    // Scanned save base "zelda (usa)" should match both zelda ROMs; without a
+    // slug hint the first entry (highest priority order) wins.
+    REQUIRE(romm::romIdForMatch(kTestRoms, "zelda (usa)", "") == 11);
+}
+
+TEST_CASE("romIdForMatch prefers same-slug match when hint given") {
+    REQUIRE(romm::romIdForMatch(kTestRoms, "zelda (usa)", "gbc") == 12);
+    REQUIRE(romm::romIdForMatch(kTestRoms, "zelda (usa)", "gba") == 11);
+}
+
+TEST_CASE("romIdForMatch matches nested fsName lookup base") {
+    // fsNameLower "subdir/game.sfc" -> saveLookupBase -> "subdir/game".
+    REQUIRE(romm::romIdForMatch(kTestRoms, "subdir/game", "") == 14);
+}
+
+TEST_CASE("romIdForMatch unmatched returns 0") {
+    REQUIRE(romm::romIdForMatch(kTestRoms, "nonexistent", "") == 0);
+    REQUIRE(romm::romIdForMatch({}, "anything", "") == 0);
+}
+
+TEST_CASE("romIdForMatch case-insensitive against filesystem name") {
+    // Scanned base is already lowercased; ensure a lowercased fsName matches.
+    REQUIRE(romm::romIdForMatch(kTestRoms, "mario", "") == 13);
+}
+
+// ---------- formatSaveSyncSummary ----------
+
+TEST_CASE("formatSaveSyncSummary includes all counts and omits unmatched suffix when zero") {
+    REQUIRE(romm::formatSaveSyncSummary(3, 1, 2, 0, 1, 0) == "U:3 D:1 C:2 N:0 F:1");
+}
+
+TEST_CASE("formatSaveSyncSummary appends unmatched count when nonzero") {
+    REQUIRE(romm::formatSaveSyncSummary(3, 1, 2, 0, 1, 4) == "U:3 D:1 C:2 N:0 F:1 (4 unmatched)");
+}
+
+TEST_CASE("formatSaveSyncSummary handles all-zero with unmatched") {
+    REQUIRE(romm::formatSaveSyncSummary(0, 0, 0, 0, 0, 7) == "U:0 D:0 C:0 N:0 F:0 (7 unmatched)");
+}
