@@ -22,6 +22,8 @@ SOURCES := ../source/api.cpp \
            ../source/update.cpp \
            ../source/self_update.cpp \
            ../source/queue_store.cpp \
+           ../source/md5.cpp \
+           ../source/save_sync.cpp \
            ../source/cover_loader.cpp \
            ../source/stb_image_impl.cpp \
            ../tests/downloader_stubs.cpp \
@@ -46,6 +48,8 @@ SOURCES := ../source/api.cpp \
            test_update.cpp \
            test_self_update.cpp \
            test_firmware.cpp \
+           test_md5.cpp \
+           test_save_sync.cpp \
            logger_stub.cpp
 
 all: $(TARGET)

@@ -42,6 +42,11 @@ struct HttpRequestOptions {
     bool followRedirects{false}; // off by default (avoid auth leaks / unexpected cross-host redirects)
     std::atomic<bool>* cancelRequested{nullptr};
     std::atomic<int>* activeSocketFd{nullptr};
+    // Optional request body for non-GET/HEAD requests (JSON or multipart).
+    // Empty by default = unchanged behavior. When set, POSTFIELDS is configured
+    // so curl sends this payload with the custom method.
+    const void* requestBody{nullptr};
+    size_t requestBodySize{0};
 };
 
 struct HttpTransaction {

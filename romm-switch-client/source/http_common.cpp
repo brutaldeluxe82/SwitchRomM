@@ -594,6 +594,14 @@ static bool setupCurlRequest(CURL* easy,
     } else if (method == "GET") {
         curl_easy_setopt(easy, CURLOPT_HTTPGET, 1L);
     } else {
+        // Configure the request body before CUSTOMREQUEST so curl's non-GET
+        // method + payload combination is set up correctly. Works with both
+        // JSON bodies and multipart bodies (phase 2).
+        if (options.requestBodySize > 0 && options.requestBody != nullptr) {
+            curl_easy_setopt(easy, CURLOPT_POSTFIELDS, options.requestBody);
+            curl_easy_setopt(easy, CURLOPT_POSTFIELDSIZE_LARGE,
+                             (curl_off_t)options.requestBodySize);
+        }
         curl_easy_setopt(easy, CURLOPT_CUSTOMREQUEST, method.c_str());
     }
     return true;
