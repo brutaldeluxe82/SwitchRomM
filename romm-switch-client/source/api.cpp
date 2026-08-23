@@ -1112,8 +1112,13 @@ bool enrichGameWithFiles(const Config& cfg, Game& g, std::string& outError, Erro
             downloadUrlField = dl->second.str;
         }
         std::string finalUrl = absolutizeUrl(downloadUrlField);
-        if (finalUrl.empty() && !fid.empty() && !fname.empty()) {
-            finalUrl = cfg.serverUrl + "/api/romsfiles/" + fid + "/content/" + romm::util::urlEncode(fname);
+        if (finalUrl.empty() && !fid.empty() && !fname.empty() && !g.id.empty()) {
+            // Current RomM route: GET /api/roms/{rom_id}/content/{file_name}
+            // (optional ?file_ids= narrows multi-file ROMs; a single file id
+            // suffices here). The legacy /api/romsfiles/{id}/content/... route
+            // no longer exists and returns 404.
+            finalUrl = cfg.serverUrl + "/api/roms/" + g.id + "/content/" +
+                       romm::util::urlEncode(fname) + "?file_ids=" + fid;
         }
 
         if (fname.empty() || fid.empty() || fsize == 0 || finalUrl.empty()) {
