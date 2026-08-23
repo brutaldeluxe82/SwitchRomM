@@ -2,12 +2,9 @@
 
 #include <cctype>
 #include <filesystem>
-#include <fstream>
-#include <cstring>
 #include <vector>
 #include <string>
 
-#include <minizip/unzip.h>
 
 namespace romm {
 
@@ -134,37 +131,6 @@ const std::vector<std::pair<const char*, const char*>>& slugAliases() {
     return kAliases;
 }
 
-// Sanitize a zip entry name into a safe relative path under destDir.
-// Returns "" if the entry is unsafe (absolute, drive letter, or ".." component).
-std::string sanitizeZipEntry(const std::string& raw) {
-    std::string name = raw;
-    // Normalize backslashes to forward slashes (zip-slip defense-in-depth).
-    for (auto& c : name) {
-        if (c == '\\') c = '/';
-    }
-    if (name.empty()) return "";
-    // Reject absolute paths (unix) and drive-letter / UNC (windows) prefixes.
-    if (name[0] == '/') return "";
-    if (name.size() >= 2 && name[1] == ':') return "";
-    if (name.rfind("//", 0) == 0) return "";
-    // Split into components and reject any ".." (or ".") segments.
-    std::vector<std::string> comps;
-    size_t start = 0;
-    while (start <= name.size()) {
-        size_t slash = name.find('/', start);
-        std::string comp = name.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
-        if (comp == "..") return "";
-        if (!comp.empty() && comp != ".") comps.push_back(comp);
-        if (slash == std::string::npos) break;
-        start = slash + 1;
-    }
-    std::string out;
-    for (size_t i = 0; i < comps.size(); ++i) {
-        if (i) out.push_back('/');
-        out += comps[i];
-    }
-    return out;
-}
 
 } // namespace
 
@@ -215,109 +181,5 @@ std::string layoutBiosFolder(const std::string& rommSlug, const std::string& bio
     return biosRoot + "/" + folder;
 }
 
-bool layoutRequiresExtraction(OutputLayout layout) {
-    return layout == OutputLayout::Tico;
-}
-
-bool extractZipToDir(const std::string& zipPath, const std::string& destDir, std::string& err) {
-    err.clear();
-    unzFile zf = unzOpen64(zipPath.c_str());
-    if (!zf) {
-        err = "Failed to open zip: " + zipPath;
-        return false;
-    }
-
-    bool ok = true;
-    const size_t kChunk = 64 * 1024;
-    std::vector<char> buf(kChunk);
-
-    int rc = unzGoToFirstFile(zf);
-    while (rc == UNZ_OK) {
-        unz_file_info64 info;
-        char entryName[1024];
-        std::memset(entryName, 0, sizeof(entryName));
-        if (unzGetCurrentFileInfo64(zf, &info, entryName, sizeof(entryName), nullptr, 0, nullptr, 0) != UNZ_OK) {
-            err = "Failed to read zip entry info";
-            ok = false;
-            break;
-        }
-
-        bool skip = false;
-        std::string rel;
-        {
-            std::string raw = entryName;
-            bool isDir = !raw.empty() && raw.back() == '/';
-            if (!isDir) {
-                rel = sanitizeZipEntry(raw);
-                if (rel.empty()) {
-                    // Unsafe (zip-slip) entry: skip it entirely rather than write outside dest.
-                    skip = true;
-                }
-            } else {
-                skip = true; // directory records don't need writing
-            }
-        }
-
-        if (!skip) {
-            if (unzOpenCurrentFile(zf) != UNZ_OK) {
-                err = "Failed to open zip entry: " + rel;
-                ok = false;
-                break;
-            }
-            std::filesystem::path outPath = std::filesystem::path(destDir) / rel;
-            std::error_code ec;
-            // Create parent directories (error_code overload: no exceptions).
-            std::filesystem::create_directories(outPath.parent_path(), ec);
-            if (ec) {
-                err = "Failed to create directory for " + rel + ": " + ec.message();
-                unzCloseCurrentFile(zf);
-                ok = false;
-                break;
-            }
-            std::ofstream ofs(outPath.string(), std::ios::binary | std::ios::trunc);
-            if (!ofs) {
-                err = "Failed to open output file: " + outPath.string();
-                unzCloseCurrentFile(zf);
-                ok = false;
-                break;
-            }
-            int readBytes = 0;
-            bool writeFailed = false;
-            while ((readBytes = unzReadCurrentFile(zf, buf.data(), static_cast<unsigned>(buf.size()))) > 0) {
-                ofs.write(buf.data(), readBytes);
-                if (!ofs) {
-                    writeFailed = true;
-                    break;
-                }
-            }
-            if (readBytes < 0) {
-                err = "Failed reading zip entry: " + rel;
-                writeFailed = true;
-            }
-            ofs.close();
-            unzCloseCurrentFile(zf);
-            if (writeFailed) {
-                std::error_code fec;
-                std::filesystem::remove(outPath, fec); // best-effort cleanup of partial entry
-                err = err.empty() ? "Failed writing entry: " + rel : err;
-                ok = false;
-                break;
-            }
-        }
-
-        rc = unzGoToNextFile(zf);
-    }
-
-    if (ok && rc != UNZ_END_OF_LIST_OF_FILE) {
-        err = "Unexpected error iterating zip entries";
-        ok = false;
-    }
-
-    unzClose(zf);
-    if (!ok) {
-        return false;
-    }
-    return true;
-}
 
 } // namespace romm

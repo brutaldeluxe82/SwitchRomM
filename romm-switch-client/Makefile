@@ -53,7 +53,7 @@ ASFLAGS     := -g $(ARCH)
 
 LDFLAGS     := -specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-LIBS        := -lSDL2 -lEGL -lglapi -ldrm_nouveau -lnx $(CURL_LIBS) -lminizip -lz
+LIBS        := -lSDL2 -lEGL -lglapi -ldrm_nouveau -lnx $(CURL_LIBS)
 
 LIBDIRS     := $(PORTLIBS) $(LIBNX)
 

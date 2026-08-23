@@ -56,7 +56,7 @@ SOURCES := ../source/api.cpp \
 all: $(TARGET)
 
 $(TARGET): $(SOURCES)
-	$(CXX) $(CXXFLAGS) -o $@ $(SOURCES) -lminizip -lz
+	$(CXX) $(CXXFLAGS) -o $@ $(SOURCES)
 
 .PHONY: clean
 clean:
