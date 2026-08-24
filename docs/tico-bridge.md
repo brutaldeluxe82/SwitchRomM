@@ -28,9 +28,12 @@ Root: `sdmc:/tico/`
 | Config/assets | `sdmc:/tico/config/`, `sdmc:/tico/data/` | tico-managed; don't touch. |
 
 ### ROM file constraints (wiki, library-and-roms)
-- **No `.zip` / `.7z`** per the wiki — but overridden by decision 2026-08-23: SwitchRomM
-  keeps archives intact. Arcade (FBNeo/MAME) ROMs must stay zipped; tico's cores load
-  them directly.
+- **No `.zip` / `.7z`** per the wiki — applies to console ROMs (the wiki's format
+  list ends at GC/Wii; arcade is undocumented). SwitchRomM extracts console zips on
+  download, but keeps arcade-class romsets (`arcade`/`mame`/`fbneo`/`fba` slugs)
+  packed: tico's FBNeo build declares libretro `block_extract` + `need_fullpath`
+  (`ticohq/tico-fbneo` `src/burner/libretro/libretro.cpp`) and loads the archive
+  itself.
 - Disc consoles: **`.chd` recommended**, single file per disc; `.cue/.bin`, `.gdi` also OK if all tracks in same folder.
 - Multi-disc: same console root folder, identical base filename differing only by disc number. tico scans up to 10 discs.
 - ROM may sit directly in the platform root or one subfolder.
@@ -54,7 +57,8 @@ The bridge is implemented in SwitchRomM as of `main`:
 
 - **ROM downloads into tico layout**: `output_layout` config key (`tico` default,
   `retroarch` supported) routes ROMs to `sdmc:/tico/roms/<platform>/` (slug-mapped) or
-  `sdmc:/retroarch/.retroarch/roms/`; downloads are stored as-is (archives kept intact).
+  `sdmc:/retroarch/.retroarch/roms/`; console `.zip` downloads are extracted on
+  arrival, arcade-class romsets stay packed.
 - **BIOS**: `/api/firmware` listing + download into `sdmc:/tico/system/<platform>/`
   (`sdmc:/retroarch/.retroarch/system/` under retroarch layout); triggered from the
   DIAGNOSTICS view (Up = sync BIOS for the selected platform).
