@@ -1,10 +1,11 @@
 #include "romm/downloader.hpp"
-#include "romm/logger.hpp"
 #include "romm/filesystem.hpp"
-#include "romm/api.hpp"
+#include "romm/firmware.hpp"
+#include "romm/logger.hpp"
 #include "romm/util.hpp"
 #include "romm/raii.hpp"
 #include "romm/http_common.hpp"
+#include "romm/api.hpp"
 #include "romm/manifest.hpp"
 #include "romm/queue_store.hpp"
 #include "romm/speed_test.hpp"
@@ -214,7 +215,7 @@ static bool parsePartIndex(const std::string& name, int& outIdx) {
 }
 
 // Preflight: try HEAD first; if it fails or is rejected, fall back to Range: 0-0 GET.
-static bool preflight(const std::string& url, const std::string& authBasic, int timeoutSec, PreflightInfo& info) {
+static bool preflight(const std::string& url, const std::string& authHeader, int timeoutSec, PreflightInfo& info) {
     info = {};
     auto doRequest = [&](const std::string& method,
                          bool addRange00,
@@ -223,13 +224,12 @@ static bool preflight(const std::string& url, const std::string& authBasic, int 
         outCode = 0;
         outParsed = ParsedHttpResponse{};
         std::vector<std::pair<std::string, std::string>> headers;
-        if (!authBasic.empty()) headers.emplace_back("Authorization", "Basic " + authBasic);
+        if (!authHeader.empty()) headers.emplace_back("Authorization", authHeader);
         if (addRange00) headers.emplace_back("Range", "bytes=0-0");
 
         HttpRequestOptions opts;
         opts.timeoutSec = timeoutSec;
         opts.keepAlive = false;
-        opts.decodeChunked = true;
         opts.activeSocketFd = &gCtx.activeSocketFd;
 
         HttpTransaction tx;
@@ -288,7 +288,7 @@ bool parseLengthAndRangesForTest(const std::string& headers, bool& supportsRange
 // Stream a continuous HTTP GET (optionally with Range) and split into FAT32-friendly parts.
 // TODO(manifest/hashes): track expected parts/sizes/hashes to validate resume beyond size-only.
 static bool streamDownload(const std::string& url,
-                           const std::string& authBasic,
+                           const std::string& authHeader,
                            bool useRange,
                            uint64_t startOffset,
                            uint64_t totalSize,
@@ -383,10 +383,6 @@ static bool streamDownload(const std::string& url,
             err = "HTTP status " + std::to_string(statusCode);
             return false;
         }
-        if (parsedHeaders.chunked) {
-            err = "Chunked transfer not supported for streaming downloads";
-            return false;
-        }
         if (parsedHeaders.hasContentRange) {
             if (parsedHeaders.contentRangeStart != startOffset) {
                 err = "Content-Range start mismatch";
@@ -410,7 +406,7 @@ static bool streamDownload(const std::string& url,
     };
 
     std::vector<std::pair<std::string, std::string>> headers;
-    if (!authBasic.empty()) headers.emplace_back("Authorization", "Basic " + authBasic);
+    if (!authHeader.empty()) headers.emplace_back("Authorization", authHeader);
     if (useRange && startOffset > 0) {
         headers.emplace_back("Range", "bytes=" + std::to_string(startOffset) + "-");
     }
@@ -418,7 +414,6 @@ static bool streamDownload(const std::string& url,
     HttpRequestOptions opts;
     opts.timeoutSec = timeoutSec;
     opts.keepAlive = false;
-    opts.decodeChunked = false;
     opts.cancelRequested = &gCtx.stopRequested;
     opts.activeSocketFd = &gCtx.activeSocketFd;
 
@@ -632,9 +627,14 @@ static std::string sanitizeRelativePath(const std::string& rel) {
 
 // Download a single file (Game-compatible) into FAT32-safe parts. Resumes completed parts; deletes partial fragments.
 static bool downloadOneFile(Game g, const DownloadFileSpec* spec, Status& status, const Config& cfg) {
+    // Auth precedence lives in api.cpp appendAuthHeaders: device bearer token
+    // first, Basic credentials as fallback. Header value is a snapshot; the
+    // worker deliberately holds its own Config copy (no live token refresh).
+    std::vector<std::pair<std::string, std::string>> authHeaders;
+    romm::appendAuthHeaders(cfg, authHeaders);
     std::string auth;
-    if (!cfg.username.empty() || !cfg.password.empty()) {
-        auth = romm::util::base64Encode(cfg.username + ":" + cfg.password);
+    for (const auto& h : authHeaders) {
+        if (h.first == "Authorization") auth = h.second;
     }
     std::string platformSlug = g.platformSlug.empty() ? "unknown" : g.platformSlug;
     std::string platSafe = safeName(platformSlug);
@@ -642,14 +642,18 @@ static bool downloadOneFile(Game g, const DownloadFileSpec* spec, Status& status
     std::string fileSafe = safeName(g.fileId);
     if (romSafe.empty()) romSafe = "rom";
     if (fileSafe.empty()) fileSafe = "file";
-    // Final outputs live under <downloadDir>/<platform>/<title__id.ext>
-    std::string baseDir = effectiveDownloadDir(cfg) + "/" + platSafe + "/" + romFolderName(g);
+    // Final outputs live under <downloadDir>/<platform>/<title__id.ext>,
+    // or in the platform's BIOS dir for firmware files.
+    std::string baseDir;
+    if (spec && spec->isBios) {
+        baseDir = romm::biosDestinationDir(cfg, platformSlug);
+    } else {
+        baseDir = effectiveDownloadDir(cfg) + "/" + platSafe + "/" + romFolderName(g);
+    }
     ensureDirectory(baseDir);
     // Temps live under <downloadDir>/temp/<platform>/<romId>/<fileId>/...
     std::string tempRoot = effectiveDownloadDir(cfg) + "/temp/" + platSafe + "/" + romSafe + "/" + fileSafe;
     ensureDirectory(tempRoot);
-
-    // free space check for full ROM upfront (best effort)
     uint64_t freeBytes = 0;
     if (!ensureFreeSpace(baseDir, g.sizeBytes, &freeBytes)) {
         std::string msg = "Not enough free space (need " + std::to_string(g.sizeBytes) +
@@ -810,6 +814,12 @@ static bool downloadOneFile(Game g, const DownloadFileSpec* spec, Status& status
     auto refreshMetadata = [&]() mutable -> bool {
         if (refreshedMetadata) return false;
         refreshedMetadata = true;
+        // Firmware files have no ROM metadata endpoint (/api/roms/{id} would
+        // 422 on the synthetic __bios__ id); the planned URL is authoritative.
+        if (spec && spec->isBios) {
+            logLine("BIOS download: skipping metadata refresh for " + g.title);
+            return false;
+        }
         logLine("Refreshing metadata for " + g.title + " after bad response");
         std::string enrichErr;
         if (!enrichGameWithFiles(cfg, g, enrichErr)) {
@@ -840,17 +850,21 @@ static bool downloadOneFile(Game g, const DownloadFileSpec* spec, Status& status
         status.currentDownloadSize.store(totalSize);
         return true;
     };
-    // If preflight returned an implausibly tiny length (e.g., HTML error page), try one refresh up front.
-    if (pf.contentLength > 0 && pf.contentLength < kTinyContentThreshold) {
+    // If preflight returned an implausibly tiny length (e.g., HTML error page), try one
+    // refresh up front. Legitimately small files are exempt: when the server's length
+    // matches the planned size the URL is fine, so download directly.
+    if (pf.contentLength > 0 && pf.contentLength < kTinyContentThreshold &&
+        pf.contentLength != g.sizeBytes) {
         logLine("Tiny Content-Length (" + std::to_string(pf.contentLength) + " bytes) for " + g.title + "; attempting metadata refresh");
         if (refreshMetadata()) {
             totalSize = status.currentDownloadSize.load();
+        } else if (spec && spec->isBios) {
+            logLine("BIOS download: proceeding with planned size despite tiny length");
         } else {
             err = "Server returned tiny Content-Length (" + std::to_string(pf.contentLength) + " bytes)";
             return false;
         }
     }
-
     while (attempt < maxAttempts && !okStream && !gCtx.stopRequested.load()) {
         bool useRange = pf.supportsRanges && haveBytes > 0;
         if (!pf.supportsRanges && haveBytes > 0) {

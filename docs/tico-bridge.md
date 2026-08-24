@@ -61,7 +61,8 @@ The bridge is implemented in SwitchRomM as of `main`:
   arrival, arcade-class romsets stay packed.
 - **BIOS**: `/api/firmware` listing + download into `sdmc:/tico/system/<platform>/`
   (`sdmc:/retroarch/.retroarch/system/` under retroarch layout); triggered from the
-  DIAGNOSTICS view (Up = sync BIOS for the selected platform).
+  PLATFORMS - BIOS index (ZR/ZL cycles ROM/BIOS index, A enqueues the selected
+  platform's firmware through the standard download queue/worker).
 - **Save/state sync** (saves AND states): device-auth pairing
   (`/api/auth/device/init`, `/api/auth/device/token`, token persisted at
   `sdmc:/switch/romm_switch_client/device_token.json`), then per run:
@@ -69,10 +70,10 @@ The bridge is implemented in SwitchRomM as of `main`:
   (`saveFile`/`stateFile`), binary downloads, `/api/saves/{id}/downloaded` confirm,
   `/api/sync/sessions/{id}/complete`. Battery saves report `slot:"autosave"` because
   the server pairs negotiate rows on `(rom_id, slot)`; states are synced client-side
-  (last-writer-wins by `updated_at`, equal timestamps compare content hashes).
-- **UI**: DIAGNOSTICS view — Down = sync saves (pairing first when unpaired, showing
-  the user code while awaiting approval; leaving the view cancels an in-flight pair),
-  Up = sync BIOS, ◀▶ = platform select.
+- **UI**: PLATFORMS index cycles ROM/BIOS lists with ZR/ZL; the BIOS index shows
+  per-platform firmware counts and A enqueues a firmware download. DIAGNOSTICS
+  view — Down = sync saves (pairing first when unpaired, showing the user code
+  while awaiting approval; leaving the view cancels an in-flight pair).
 
 
 ## Alignment verdict

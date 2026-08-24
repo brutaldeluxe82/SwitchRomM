@@ -131,6 +131,7 @@ TEST_CASE("init response happy path") {
     REQUIRE(out.deviceCode == "dc1");
     REQUIRE(out.userCode == "ABCD-EFGH");
     REQUIRE(out.verificationPath == "/pair/device");
+    REQUIRE(out.verificationUrlComplete == "/pair/device?user_code=ABCD-EFGH");
     REQUIRE(out.verificationPathComplete == true);
     REQUIRE(out.expiresIn == 600);
     REQUIRE(out.interval == 5);

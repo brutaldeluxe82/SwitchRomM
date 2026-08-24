@@ -11,7 +11,7 @@ TEST_CASE("classifyError maps auth and HTTP status") {
 }
 
 TEST_CASE("classifyError maps unsupported feature") {
-    romm::ErrorInfo info = romm::classifyError("Chunked transfer not supported", romm::ErrorCategory::Network);
+    romm::ErrorInfo info = romm::classifyError("Redirect not supported (HTTP 302) to https://example.invalid/x", romm::ErrorCategory::Network);
     REQUIRE(info.category == romm::ErrorCategory::Unsupported);
     REQUIRE(info.code == romm::ErrorCode::UnsupportedFeature);
     REQUIRE_FALSE(info.retryable);

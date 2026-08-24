@@ -11,9 +11,11 @@ enum class Action {
     Left,
     Right,
     Select,
-    OpenSearch,
     OpenDiagnostics,
     OpenUpdater,
+    OpenSettings, // Plus: open settings
+    CycleIndexForward,  // ZR: PLATFORMS ROM <-> BIOS index
+    CycleIndexBackward, // ZL: BIOS <-> ROM
     OpenQueue,
     Back,
     StartDownload,

@@ -28,7 +28,7 @@ TEST_CASE("httpRequestStreamMock parses status and headers") {
     REQUIRE(total == 5);
 }
 
-TEST_CASE("httpRequestStreamMock rejects chunked transfer") {
+TEST_CASE("httpRequestStreamMock decodes chunked transfer") {
     const std::string raw =
         "HTTP/1.1 200 OK\r\n"
         "Transfer-Encoding: chunked\r\n"
@@ -36,16 +36,38 @@ TEST_CASE("httpRequestStreamMock rejects chunked transfer") {
         "4\r\nTest\r\n0\r\n\r\n";
 
     romm::HttpResponse resp;
+    std::string received;
     std::string err;
     bool ok = romm::httpRequestStreamMock(raw, resp,
-        [&](const char* /*data*/, size_t len) {
-            (void)len;
+        [&](const char* data, size_t len) {
+            received.append(data, len);
+            return true;
+        },
+        err);
+
+    REQUIRE(ok);
+    REQUIRE(err.empty());
+    REQUIRE(resp.statusCode == 200);
+    REQUIRE(received == "Test");
+}
+
+TEST_CASE("httpRequestStreamMock rejects malformed chunked body") {
+    const std::string raw =
+        "HTTP/1.1 200 OK\r\n"
+        "Transfer-Encoding: chunked\r\n"
+        "\r\n"
+        "4\r\nTes\r\n0\r\n\r\n"; // declares 4 bytes, provides 3
+
+    romm::HttpResponse resp;
+    std::string err;
+    bool ok = romm::httpRequestStreamMock(raw, resp,
+        [&](const char* /*data*/, size_t /*len*/) {
             return true;
         },
         err);
 
     REQUIRE_FALSE(ok);
-    REQUIRE_FALSE(err.empty());
+    REQUIRE(err == "Malformed chunked body");
 }
 
 TEST_CASE("httpRequestStreamMock detects short read against Content-Length") {

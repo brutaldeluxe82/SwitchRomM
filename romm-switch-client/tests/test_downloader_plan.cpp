@@ -137,3 +137,42 @@ TEST_CASE("parseLengthAndRangesForTest fails without length info") {
     REQUIRE_FALSE(romm::parseLengthAndRangesForTest(hdrs, ranges, len));
     REQUIRE(len == 0);
 }
+
+TEST_CASE("buildFirmwareBundle URL-encodes file names and routes to BIOS") {
+    std::vector<romm::Firmware> files;
+    romm::Firmware fw;
+    fw.id = 42;
+    fw.fileName = "scph5501 (USA).bin";
+    fw.fileSizeBytes = 5242880;
+    files.push_back(fw);
+
+    romm::DownloadBundle bundle =
+        romm::buildFirmwareBundle("psx", "Sony Playstation", files, "http://x:8080");
+    REQUIRE(bundle.files.size() == 1);
+    REQUIRE(bundle.romId == "__bios__psx");
+    REQUIRE(bundle.title == "Sony Playstation BIOS");
+    REQUIRE(bundle.mode == "firmware");
+    const auto& spec = bundle.files[0];
+    REQUIRE(spec.isBios);
+    REQUIRE(spec.sizeBytes == 5242880);
+    // Spaces and parentheses must be percent-encoded.
+    REQUIRE(spec.url.find("%20%28USA%29.bin") != std::string::npos);
+    REQUIRE(spec.url == "http://x:8080/api/firmware/42/content/scph5501%20%28USA%29.bin");
+}
+
+TEST_CASE("buildFirmwareBundle skips empty file names") {
+    std::vector<romm::Firmware> files;
+    romm::Firmware empty1;
+    empty1.id = 1;
+    romm::Firmware good;
+    good.id = 2;
+    good.fileName = "bios.bin";
+    good.fileSizeBytes = 1024;
+    files.push_back(empty1);
+    files.push_back(good);
+
+    romm::DownloadBundle bundle =
+        romm::buildFirmwareBundle("nes", "Nintendo", files, "http://x");
+    REQUIRE(bundle.files.size() == 1);
+    REQUIRE(bundle.files[0].fileId == "2");
+}

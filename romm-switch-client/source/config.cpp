@@ -293,6 +293,72 @@ static bool parseJson(const std::string& path, Config& outCfg, std::string& outE
     return true;
 }
 
+#ifndef UNIT_TEST
+static
+#endif
+std::string serializeConfigJson(const Config& cfg) {
+    // Small JSON string escaper: escapes backslash and quote; others pass through.
+    // Mirrors save_sync.cpp escapeJson (kept local: both files serialize their own docs).
+    auto escapeJson = [](const std::string& in) {
+        std::string out;
+        out.reserve(in.size());
+        for (char c : in) {
+            if (c == '\\' || c == '"') out.push_back('\\');
+            out.push_back(c);
+        }
+        return out;
+    };
+    auto strVal = [&](std::ostringstream& os, const char* key, const std::string& val, bool comma) {
+        os << "\"" << key << "\":\"" << escapeJson(val) << "\"" << (comma ? "," : "");
+    };
+    auto intVal = [&](std::ostringstream& os, const char* key, int val, bool comma) {
+        os << "\"" << key << "\":" << val << (comma ? "," : "");
+    };
+    auto boolVal = [&](std::ostringstream& os, const char* key, bool val, bool comma) {
+        os << "\"" << key << "\":" << (val ? "true" : "false") << (comma ? "," : "");
+    };
+    std::ostringstream os;
+    os << "{";
+    intVal(os, "schema_version", cfg.schemaVersion > 0 ? cfg.schemaVersion : 1, true);
+    strVal(os, "server_url", cfg.serverUrl, true);
+    strVal(os, "username", cfg.username, true);
+    strVal(os, "password", cfg.password, true);
+    // api_token is intentionally not persisted here: the paired device token
+    // lives in device_token.json; writing it into config.json would resurrect
+    // stale tokens after Sign out deletes that file.
+    strVal(os, "platform", cfg.platform, true);
+    strVal(os, "output_layout", cfg.outputLayout, true);
+    strVal(os, "download_dir", cfg.downloadDir, true);
+    strVal(os, "bios_dir", cfg.biosDir, true);
+    intVal(os, "http_timeout_seconds", cfg.httpTimeoutSeconds, true);
+    boolVal(os, "fat32_safe", cfg.fat32Safe, true);
+    boolVal(os, "extract_archive", cfg.extractArchive, true);
+    strVal(os, "log_level", cfg.logLevel, true);
+    strVal(os, "speed_test_url", cfg.speedTestUrl, true);
+    strVal(os, "platform_prefs_mode", cfg.platformPrefsMode, true);
+    strVal(os, "platform_prefs_sd", cfg.platformPrefsPathSd, true);
+    strVal(os, "platform_prefs_romfs", cfg.platformPrefsPathRomfs, false);
+    os << "}";
+    return os.str();
+}
+
+bool saveConfigJson(const Config& cfg, std::string& err) {
+    err.clear();
+    const std::string path = "sdmc:/switch/romm_switch_client/config.json";
+    std::ofstream out(path, std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!out) {
+        err = "failed to open " + path + " for writing";
+        return false;
+    }
+    out << serializeConfigJson(cfg) << "\n";
+    out.flush();
+    if (!out.good()) {
+        err = "failed to write " + path;
+        return false;
+    }
+    return true;
+}
+
 bool loadConfig(Config& outCfg, std::string& outError, ErrorInfo* outInfo) {
     if (outInfo) *outInfo = ErrorInfo{};
     outError.clear();

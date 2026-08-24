@@ -123,37 +123,6 @@ static bool isCancelled(const HttpRequestOptions& options) {
     return true;
 }
 
-[[maybe_unused]] static bool decodeChunkedBodyInternal(const std::string& body, std::string& decoded) {
-    decoded.clear();
-    size_t pos = 0;
-    while (pos < body.size()) {
-        size_t lineEnd = body.find("\r\n", pos);
-        if (lineEnd == std::string::npos) return false;
-        std::string lenLine = body.substr(pos, lineEnd - pos);
-        auto semicolon = lenLine.find(';');
-        if (semicolon != std::string::npos) lenLine = lenLine.substr(0, semicolon);
-        while (!lenLine.empty() && std::isspace(static_cast<unsigned char>(lenLine.front()))) lenLine.erase(lenLine.begin());
-        while (!lenLine.empty() && std::isspace(static_cast<unsigned char>(lenLine.back()))) lenLine.pop_back();
-        errno = 0;
-        char* endptr = nullptr;
-        long chunkSize = std::strtol(lenLine.c_str(), &endptr, 16);
-        if (endptr == lenLine.c_str() || errno == ERANGE || chunkSize < 0) return false;
-        pos = lineEnd + 2;
-        if (chunkSize == 0) {
-            if (pos + 2 > body.size()) return false;
-            if (body[pos] != '\r' || body[pos + 1] != '\n') return false;
-            return true;
-        }
-        if (pos + static_cast<size_t>(chunkSize) > body.size()) return false;
-        decoded.append(body, pos, static_cast<size_t>(chunkSize));
-        pos += static_cast<size_t>(chunkSize);
-        if (pos + 2 > body.size()) return false;
-        if (body[pos] != '\r' || body[pos + 1] != '\n') return false;
-        pos += 2;
-    }
-    return false;
-}
-
 [[maybe_unused]] static bool isNoBodyStatus(int statusCode) {
     return (statusCode >= 100 && statusCode < 200) || statusCode == 204 || statusCode == 304;
 }
@@ -390,7 +359,6 @@ struct CurlStreamWriteState {
     ParsedHttpResponse* parsed{nullptr};
     bool headersParsed{false};
     bool parseFailed{false};
-    bool chunkedRejected{false};
     bool sinkAborted{false};
     bool sizeExceeded{false};
     uint64_t streamed{0};
@@ -518,10 +486,6 @@ static size_t curlStreamWriteCallback(char* ptr, size_t size, size_t nmemb, void
             return 0;
         }
         state->headersParsed = true;
-        if (state->parsed->chunked) {
-            state->chunkedRejected = true;
-            return 0;
-        }
     }
 
     if (state->options && state->options->maxBodyBytes > 0 &&
@@ -800,10 +764,6 @@ bool httpRequestBuffered(const std::string& method,
     }
 
     if (!parseCurlResponseHeaders(headerState, out.parsed, err)) return false;
-    if (!options.decodeChunked && out.parsed.chunked) {
-        err = "Chunked transfer not supported";
-        return false;
-    }
     if (options.maxBodyBytes > 0 && out.body.size() > options.maxBodyBytes) {
         err = "HTTP body exceeds configured max size";
         return false;
@@ -874,20 +834,11 @@ bool httpRequestStreamed(const std::string& method,
             err = "Sink aborted";
         } else if (writeState.sizeExceeded) {
             err = "HTTP body exceeds configured max size";
-        } else if (writeState.chunkedRejected) {
-            err = "Chunked encoding not supported for streaming downloads";
         } else if (writeState.parseFailed) {
             err = writeState.parseErr;
-        } else if (rc == CURLE_OPERATION_TIMEDOUT) {
-            err = "Recv timed out";
         } else {
             err = std::string("CURL failed: ") + curl_easy_strerror(rc);
         }
-        return false;
-    }
-
-    if (writeState.chunkedRejected || outHeaders.chunked) {
-        err = "Chunked encoding not supported for streaming downloads";
         return false;
     }
     if (options.maxBodyBytes > 0 && writeState.streamed > options.maxBodyBytes) {

@@ -209,6 +209,13 @@ std::string layoutBiosFolder(const std::string& rommSlug, const std::string& bio
         return biosRoot;
     }
     if (rommSlug.empty()) return biosRoot;
+    // Tico keeps Mega CD BIOS in the Genesis system folder (not roms/sega-cd).
+    // https://ticoverse.com/wiki/library-and-roms/bios-setup
+    if (normalizeSlug(rommSlug) == "segacd") {
+        std::string genesisFolder = layoutPlatformFolder("genesis", OutputLayout::Tico);
+        if (!genesisFolder.empty() && !biosRoot.empty()) return biosRoot + "/" + genesisFolder;
+        return biosRoot;
+    }
     std::string folder = layoutPlatformFolder(rommSlug, OutputLayout::Tico);
     if (folder.empty()) return biosRoot; // unknown platform -> bios root itself
     if (biosRoot.empty()) return biosRoot;

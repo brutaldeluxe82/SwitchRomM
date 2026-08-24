@@ -4,6 +4,7 @@
 #include "romm/util.hpp"
 #include "romm/logger.hpp"
 #include "romm/http_common.hpp"
+#include "romm/api.hpp"
 #include <chrono>
 #include <mutex>
 
@@ -11,7 +12,7 @@ namespace romm {
 
 // Measure throughput by downloading up to testBytes (discarded) and return MB/s.
 static bool measureSpeed(const std::string& url,
-                         const std::string& authBasic,
+                         const Config& cfg,
                          int timeoutSec,
                          uint64_t testBytes,
                          double& mbpsOut,
@@ -21,7 +22,7 @@ static bool measureSpeed(const std::string& url,
     romm::logLine("SpeedTest: target=" + url + " bytes=" + std::to_string(testBytes));
     std::vector<std::pair<std::string, std::string>> headers;
     headers.emplace_back("Accept", "*/*");
-    if (!authBasic.empty()) headers.emplace_back("Authorization", "Basic " + authBasic);
+    romm::appendAuthHeaders(cfg, headers);
     if (testBytes > 0) {
         headers.emplace_back("Range", "bytes=0-" + std::to_string(testBytes - 1));
     }
@@ -29,8 +30,6 @@ static bool measureSpeed(const std::string& url,
     HttpRequestOptions options;
     options.timeoutSec = timeoutSec;
     options.keepAlive = false;
-    options.decodeChunked = false;
-
     ParsedHttpResponse parsed;
     uint64_t received = 0;
     auto start = std::chrono::steady_clock::now();
@@ -65,12 +64,8 @@ bool runSpeedTest(const Config& cfg, Status& status, uint64_t testBytes, std::st
         outError = "No speed test URL set";
         return false;
     }
-    std::string auth;
-    if (!cfg.username.empty() || !cfg.password.empty()) {
-        auth = romm::util::base64Encode(cfg.username + ":" + cfg.password);
-    }
     double mbps = 0.0;
-    if (!measureSpeed(cfg.speedTestUrl, auth, cfg.httpTimeoutSeconds, testBytes, mbps, outError)) {
+    if (!measureSpeed(cfg.speedTestUrl, cfg, cfg.httpTimeoutSeconds, testBytes, mbps, outError)) {
         return false;
     }
     {

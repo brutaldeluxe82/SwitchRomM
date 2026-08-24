@@ -6,10 +6,10 @@ Current Nintendo-style mapping (code-level, see `source/input.cpp` and on-screen
 - A (right): Select / confirm
 - B (bottom): Back
 - Y (left): Open queue
-- X (top): Start downloads (from queue)
-- Minus: open ROM search keyboard (ROMS view)
+- X (top): ROM search (PLATFORMS/ROMS/DETAIL), start downloads or delete pending item (QUEUE)
+- Minus: Quit
 - R: open Diagnostics (PLATFORMS view), refresh probe (DIAGNOSTICS view)
-- Plus / Start: Quit
+- Plus / Start: Settings
 
 Diagnostics launch is intentionally restricted to PLATFORMS to keep ROM footer controls uncluttered.
 

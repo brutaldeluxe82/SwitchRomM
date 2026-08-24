@@ -28,7 +28,8 @@ std::string defaultDownloadDir(OutputLayout layout);
 std::string defaultBiosDir(OutputLayout layout);
 
 // BIOS destination dir for a platform slug.
-//   tico: <biosRoot>/<layoutPlatformFolder>; retroarch: <biosRoot> (flat).
+//   tico: <biosRoot>/<layoutPlatformFolder>, except segacd which uses the
+//   genesis folder per Tico's documented BIOS layout; retroarch: flat.
 // Empty rommSlug or unknown folder on tico falls back to biosRoot itself.
 std::string layoutBiosFolder(const std::string& rommSlug, const std::string& biosRoot, OutputLayout layout);
 

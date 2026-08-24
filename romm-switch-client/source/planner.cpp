@@ -1,5 +1,6 @@
 #include "romm/planner.hpp"
 #include "romm/logger.hpp"
+#include "romm/util.hpp"
 #include <algorithm>
 #include <cctype>
 #include <map>
@@ -170,6 +171,32 @@ DownloadBundle buildBundleFromGame(const Game& g, const PlatformPrefs& prefs) {
 
     if (bundle.files.empty()) {
         romm::logLine("buildBundleFromGame: no selectable files for game " + g.id);
+    }
+    return bundle;
+}
+
+DownloadBundle buildFirmwareBundle(const std::string& platformSlug,
+                                   const std::string& platformName,
+                                   const std::vector<Firmware>& files,
+                                   const std::string& serverUrl) {
+    DownloadBundle bundle;
+    bundle.romId = std::string("__bios__") + platformSlug;
+    bundle.title = platformName + " BIOS";
+    bundle.platformSlug = platformSlug;
+    bundle.mode = "firmware";
+    for (const auto& fw : files) {
+        if (fw.fileName.empty()) continue;
+        DownloadFileSpec f;
+        f.fileId = std::to_string(fw.id);
+        f.name = fw.fileName;
+        f.url = serverUrl + "/api/firmware/" + std::to_string(fw.id) +
+                "/content/" + romm::util::urlEncode(fw.fileName);
+        f.sizeBytes = fw.fileSizeBytes;
+        f.isBios = true;
+        bundle.files.push_back(std::move(f));
+    }
+    if (bundle.files.empty()) {
+        romm::logLine("buildFirmwareBundle: no firmware files for platform " + platformSlug);
     }
     return bundle;
 }

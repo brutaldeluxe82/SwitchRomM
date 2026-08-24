@@ -21,7 +21,9 @@
   from `OUTPUT_LAYOUT`. Platform subfolders are created automatically; temps under
   `<DOWNLOAD_DIR>/temp/`.
 - `BIOS_DIR` (empty): Override the BIOS root from the table above. Empty = derive
-  from `OUTPUT_LAYOUT`.
+  from `OUTPUT_LAYOUT`. Firmware downloads go through the standard download
+  queue/worker (PLATFORMS - BIOS index, ZR/ZL to switch, A to enqueue) and land in
+  the platform's BIOS dir.
 - `HTTP_TIMEOUT_SECONDS` (`30`): HTTP send/recv timeout.
 - `FAT32_SAFE` (`true`): If true, split into FAT32/DBI-sized parts (`0xFFFF0000`). If false, keep as a single file (no splitting). Multi-part handling still uses DBI archive bit when enabled.
 - `EXTRACT_ARCHIVE` (`true`): If true, unpack `.zip` ROM downloads after fetch and delete the archive (tico layout only; ignored for retroarch). Keep `true` for consoles whose cores take loose ROMs. Set `false` wherever an arcade-class core (FBNeo/MAME) loads the zip romset directly, so the archive must stay packed — this is the `block_extract` contract from `ticohq/tico-fbneo`.

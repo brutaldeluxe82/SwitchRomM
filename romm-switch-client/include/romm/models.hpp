@@ -11,6 +11,7 @@ struct Platform {
     std::string name;
     std::string slug;
     int romCount{0};
+    int firmwareCount{0}; // >0 when RomM reports BIOS/firmware for this platform
 };
 
 struct Firmware {

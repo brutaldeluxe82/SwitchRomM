@@ -15,16 +15,13 @@ Action translateEvent(const SDL_Event& e) {
     // - B (bottom) -> back
     // - A (right)  -> select
     // - Y (left)   -> queue
-    // - X (top)    -> start downloads
-    // - Minus      -> search
-    // - R          -> diagnostics
-    // - L          -> updater
-    //
-    // SDL positional codes (with SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS=0):
-    // - A = bottom (B on Nintendo)
-    // - B = right  (A on Nintendo)
-    // - X = left   (Y on Nintendo)
-    // - Y = top    (X on Nintendo)
+    // - X (top)    -> search (index views) / start downloads (queue)
+    // - Minus      -> quit
+    // - Plus       -> settings
+    // - ZR (right shoulder)  -> cycle PLATFORMS index ROM <-> BIOS
+    // - ZL (left shoulder)   -> cycle BIOS <-> ROM
+    // - R (right stick click)-> diagnostics
+    // - L (left stick click) -> updater
     if (e.type == SDL_CONTROLLERBUTTONDOWN) {
         static Uint32 lastTicks[SDL_CONTROLLER_BUTTON_MAX] = {};
         Uint32 now = SDL_GetTicks();
@@ -48,10 +45,12 @@ Action translateEvent(const SDL_Event& e) {
             case SDL_CONTROLLER_BUTTON_B: act = Action::Select; break;          // right (A) -> select/confirm
             case SDL_CONTROLLER_BUTTON_X: act = Action::OpenQueue; break;       // left (Y) -> queue view
             case SDL_CONTROLLER_BUTTON_Y: act = Action::StartDownload; break;   // top (X) -> start downloads
-            case SDL_CONTROLLER_BUTTON_BACK: act = Action::OpenSearch; break;   // Minus -> search
-            case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: act = Action::OpenDiagnostics; break; // R -> diagnostics
-            case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: act = Action::OpenUpdater; break; // L -> updater
-            case SDL_CONTROLLER_BUTTON_START: act = Action::Quit; break;        // Plus -> exit app
+            case SDL_CONTROLLER_BUTTON_BACK: act = Action::Quit; break;         // Minus -> quit
+            case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: act = Action::CycleIndexForward; break;  // physical L/R (SDL b6/b7)
+            case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: act = Action::CycleIndexBackward; break;  // physical L/R (SDL b6/b7)
+            case SDL_CONTROLLER_BUTTON_RIGHTSTICK: act = Action::OpenDiagnostics; break;       // R stick
+            case SDL_CONTROLLER_BUTTON_LEFTSTICK: act = Action::OpenUpdater; break;            // L stick
+            case SDL_CONTROLLER_BUTTON_START: act = Action::OpenSettings; break; // Plus -> settings
             default: break;
         }
         if (act != Action::None) {
@@ -60,6 +59,20 @@ Action translateEvent(const SDL_Event& e) {
                            "INPUT");
         }
         return act;
+    }
+    // Physical ZL/ZR bind as analog triggers in the SDL switch port
+    // (mapping: lefttrigger:b8, righttrigger:b9), surfacing as axis motion.
+    if (e.type == SDL_CONTROLLERAXISMOTION &&
+        (e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT ||
+         e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT)) {
+        const bool pressed = e.caxis.value > 8192;
+        static bool triggerHeld[2] = {false, false};
+        const int idx = e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT ? 0 : 1;
+        if (pressed && !triggerHeld[idx]) {
+            triggerHeld[idx] = true; // fire once per pull; reset on release
+            return idx == 0 ? Action::CycleIndexBackward : Action::CycleIndexForward;
+        }
+        if (!pressed) triggerHeld[idx] = false;
     }
     return Action::None;
 }

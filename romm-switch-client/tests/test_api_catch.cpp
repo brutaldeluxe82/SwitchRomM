@@ -182,6 +182,52 @@ TEST_CASE("parsePlatforms preserves numeric ids without decimal suffix") {
     REQUIRE(plats[0].romCount == 123);
 }
 
+
+TEST_CASE("parsePlatforms reads firmware_count number") {
+    const std::string body = R"([{
+        "id": 7,
+        "display_name": "Sony Playstation",
+        "slug": "psx",
+        "rom_count": 5,
+        "firmware_count": 3
+    }])";
+    std::vector<romm::Platform> plats;
+    std::string err;
+    REQUIRE(romm::parsePlatformsTest(body, plats, err));
+    REQUIRE(plats.size() == 1);
+    REQUIRE(plats[0].firmwareCount == 3);
+}
+
+TEST_CASE("parsePlatforms falls back to firmware array size") {
+    const std::string body = R"([{
+        "id": 8,
+        "slug": "ps2",
+        "rom_count": 1,
+        "firmware": [
+            {"file_name": "scph5501 (USA).bin", "file_size_bytes": 5242880},
+            {"file_name": "scph70012.bin", "file_size_bytes": 4194304}
+        ]
+    }])";
+    std::vector<romm::Platform> plats;
+    std::string err;
+    REQUIRE(romm::parsePlatformsTest(body, plats, err));
+    REQUIRE(plats.size() == 1);
+    REQUIRE(plats[0].firmwareCount == 2);
+}
+
+TEST_CASE("parsePlatforms defaults firmwareCount to zero") {
+    const std::string body = R"([{
+        "id": 9,
+        "slug": "nes",
+        "rom_count": 10
+    }])";
+    std::vector<romm::Platform> plats;
+    std::string err;
+    REQUIRE(romm::parsePlatformsTest(body, plats, err));
+    REQUIRE(plats.size() == 1);
+    REQUIRE(plats[0].firmwareCount == 0);
+}
+
 TEST_CASE("parseGames preserves numeric ids without decimal suffix") {
     const std::string body = R"([{
         "id": 19,

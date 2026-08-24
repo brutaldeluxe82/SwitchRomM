@@ -67,10 +67,20 @@ bool parseFirmwareListTest(const std::string& body,
                            std::vector<Firmware>& outFirmware,
                            std::string& err);
 #endif
-// Exposed for callers that make raw HTTP requests (e.g. firmware streaming): returns the
-// base64 Basic-auth payload ("" when no credentials are configured). Consumers must prefix
-// with "Authorization: Basic " themselves.
+// Exposed for callers that make raw HTTP requests: the base64 Basic-auth
+// payload ("" when no credentials are configured). Prefer appendAuthHeaders;
+// consumers must prefix with "Authorization: Basic " themselves.
 std::string basicAuthHeader(const Config& cfg);
+// Effective bearer token for cfg: the paired device token (kept in sync with
+// device_token.json via Config::apiToken), or "" when none is set.
+std::string bearerToken(const Config& cfg);
+
+// Append the Authorization header for cfg into headers: "Bearer <token>" when
+// a bearer token is present, else "Basic <base64>" when credentials exist,
+// else nothing. Single auth policy for every request path; consumers must not
+// hand-build Authorization headers themselves.
+void appendAuthHeaders(const Config& cfg,
+                       std::vector<std::pair<std::string, std::string>>& headers);
 
 // Shared URL parser (http:// and https://).
 bool parseHttpUrl(const std::string& url,

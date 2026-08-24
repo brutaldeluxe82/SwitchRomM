@@ -108,9 +108,12 @@ static const char* viewName(Status::View v) {
         case Status::View::ERROR: return "ERROR";
         case Status::View::DIAGNOSTICS: return "DIAGNOSTICS";
         case Status::View::UPDATER: return "UPDATER";
+        case Status::View::SETTINGS: return "SETTINGS";
+        case Status::View::LOGIN: return "LOGIN";
         default: return "UNKNOWN";
     }
 }
+
 struct ScrollHold {
     int dir{0}; // -1 up, 1 down
     Uint32 nextMs{0};
@@ -441,21 +444,25 @@ static const char* romSortLabel(romm::RomSort s) {
     }
 }
 
-static bool promptSearchQuery(std::string& query) {
+static bool promptText(const char* header, const char* guide, std::string& inout) {
     SwkbdConfig kbd;
     if (R_FAILED(swkbdCreate(&kbd, 0))) {
         return false;
     }
     swkbdConfigMakePresetDefault(&kbd);
-    swkbdConfigSetHeaderText(&kbd, "ROM Search");
-    swkbdConfigSetGuideText(&kbd, "Enter title text (blank clears filter)");
-    swkbdConfigSetInitialText(&kbd, query.c_str());
+    swkbdConfigSetHeaderText(&kbd, header);
+    swkbdConfigSetGuideText(&kbd, guide);
+    swkbdConfigSetInitialText(&kbd, inout.c_str());
     char buf[256] = {};
     Result rc = swkbdShow(&kbd, buf, sizeof(buf));
     swkbdClose(&kbd);
     if (R_FAILED(rc)) return false;
-    query = buf;
+    inout = buf;
     return true;
+}
+
+static bool promptSearchQuery(std::string& query) {
+    return promptText("ROM Search", "Enter title text (blank clears filter)", query);
 }
 
 static const Glyph& glyphFor(char c) {
@@ -577,6 +584,10 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
         uint64_t downloadHistoryRevision{0};
         uint64_t historyCount{0};
         int selectedPlatformIndex{0};
+        int selectedBiosPlatformIndex{0};
+        romm::Status::PlatformIndexMode platformIndexMode{romm::Status::PlatformIndexMode::Rom};
+        struct BiosRow { size_t platformIdx; std::string name; std::string slug; std::string id; int firmwareCount; };
+        std::vector<BiosRow> biosPlatforms;
         int selectedRomIndex{0};
         int selectedQueueIndex{0};
         std::string currentPlatformId;
@@ -613,15 +624,15 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
         bool diagnosticsProbeInFlight{false};
         uint32_t diagnosticsLastProbeMs{0};
         std::string diagnosticsLastProbeDetail;
-        int firmwarePlatformIndex{0};
-        std::vector<romm::Firmware> firmwareList;
-        std::string firmwareStatusText;
-        bool firmwareBusy{false};
         romm::SavePairState savePairState{romm::SavePairState::Idle};
         std::string savePairUserCode;
         std::string savePairDetail;
         std::string saveVerificationPath;
         std::string saveStatusText;
+        int selectedSettingsIndex{0};
+        Status::View prevSettingsView{Status::View::PLATFORMS};
+        Status::View prevLoginView{Status::View::PLATFORMS};
+        std::string settingsStatus;
         bool saveBusy{false};
         bool saveServerDeviceAuthKnown{false};
         bool saveServerDeviceAuthSupported{false};
@@ -662,6 +673,16 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
         snap.downloadHistoryRevision = status.downloadHistoryRevision;
         snap.historyCount = status.downloadHistory.size();
         snap.selectedPlatformIndex = status.selectedPlatformIndex;
+        snap.selectedBiosPlatformIndex = status.selectedBiosPlatformIndex;
+        snap.platformIndexMode = status.platformIndexMode;
+        if (status.platformIndexMode == Status::PlatformIndexMode::Bios) {
+            for (size_t i = 0; i < status.platforms.size(); ++i) {
+                const auto& p = status.platforms[i];
+                if (p.firmwareCount > 0) {
+                    snap.biosPlatforms.push_back({i, p.name, p.slug, p.id, p.firmwareCount});
+                }
+            }
+        }
         snap.selectedRomIndex = status.selectedRomIndex;
         snap.selectedQueueIndex = status.selectedQueueIndex;
         snap.currentPlatformId = status.currentPlatformId;
@@ -696,15 +717,15 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
         snap.diagnosticsProbeInFlight = status.diagnosticsProbeInFlight;
         snap.diagnosticsLastProbeMs = status.diagnosticsLastProbeMs;
         snap.diagnosticsLastProbeDetail = status.diagnosticsLastProbeDetail;
-        snap.firmwarePlatformIndex = status.firmwarePlatformIndex;
-        snap.firmwareList = status.firmwareList;
-        snap.firmwareStatusText = status.firmwareStatusText;
-        snap.firmwareBusy = status.firmwareBusy.load();
         snap.savePairState = status.savePairState;
         snap.savePairUserCode = status.savePairUserCode;
         snap.savePairDetail = status.savePairDetail;
         snap.saveVerificationPath = status.saveVerificationPath;
-        snap.saveStatusText = status.saveStatusText;
+        snap.saveServerVersion = status.saveServerVersion;
+        snap.selectedSettingsIndex = status.selectedSettingsIndex;
+        snap.prevSettingsView = status.prevSettingsView;
+        snap.prevLoginView = status.prevLoginView;
+        snap.settingsStatus = status.settingsStatus;
         snap.saveBusy = status.saveBusy.load();
         snap.saveServerDeviceAuthKnown = status.saveServerDeviceAuthKnown;
         snap.saveServerDeviceAuthSupported = status.saveServerDeviceAuthSupported;
@@ -864,6 +885,8 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
             case Status::View::ERROR: romm::logLine("View: ERROR"); break;
             case Status::View::DIAGNOSTICS: romm::logLine("View: DIAGNOSTICS"); break;
             case Status::View::UPDATER: romm::logLine("View: UPDATER"); break;
+            case Status::View::SETTINGS: romm::logLine("View: SETTINGS"); break;
+            case Status::View::LOGIN: romm::logLine("View: LOGIN"); break;
             default: break;
         }
         gLastLoggedView = snap.view;
@@ -910,6 +933,14 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
         case Status::View::UPDATER:
             SDL_SetRenderDrawColor(renderer, 16, 20, 70, 255);
             headerBar = {50, 70, 170, 255};
+            break;
+        case Status::View::SETTINGS:
+            SDL_SetRenderDrawColor(renderer, 20, 26, 44, 255);
+            headerBar = {60, 80, 140, 255};
+            break;
+        case Status::View::LOGIN:
+            SDL_SetRenderDrawColor(renderer, 14, 30, 54, 255);
+            headerBar = {40, 80, 150, 255};
             break;
     }
     SDL_RenderClear(renderer);
@@ -1230,26 +1261,43 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
     std::string header;
     std::string controls;
     if (snap.view == Status::View::PLATFORMS) {
-        header = "PLATFORMS  Count: " + std::to_string(snap.platforms.size());
-        if (selPlat >= 0 && selPlat < (int)snap.platforms.size()) {
-            const auto& p = snap.platforms[selPlat];
+        const bool biosMode = (snap.platformIndexMode == Status::PlatformIndexMode::Bios);
+        const size_t listCount = biosMode ? snap.biosPlatforms.size() : snap.platforms.size();
+        header = biosMode ? "PLATFORMS - BIOS  Count: " + std::to_string(listCount)
+                          : "PLATFORMS - ROM  Count: " + std::to_string(listCount);
+        int selPlatIdx = biosMode ? snap.selectedBiosPlatformIndex : snap.selectedPlatformIndex;
+        if (biosMode) {
+            if (selPlatIdx >= 0 && selPlatIdx < (int)snap.biosPlatforms.size()) {
+                const auto& row = snap.biosPlatforms[(size_t)selPlatIdx];
+                const std::string& slugish = !row.slug.empty() ? row.slug : row.id;
+                if (!slugish.empty()) header += "  RomM Platform: " + ellipsize(slugish, 16);
+            }
+        } else if (selPlatIdx >= 0 && selPlatIdx < (int)snap.platforms.size()) {
+            const auto& p = snap.platforms[(size_t)selPlatIdx];
             if (!p.slug.empty()) header += "  RomM Platform: " + ellipsize(p.slug, 16);
             else if (!p.id.empty()) header += "  RomM Platform: " + ellipsize(p.id, 16);
         }
         SDL_Color fg{255,255,255,255};
-        int listHeight = static_cast<int>(snap.platforms.size()) * 26 + 32;
+        int listHeight = static_cast<int>(listCount) * 26 + 32;
         if (listHeight < 120) listHeight = 120;
         SDL_Rect listBg{48, 60, 560, listHeight};
         SDL_SetRenderDrawColor(renderer, 24, 70, 140, 180);
         SDL_RenderFillRect(renderer, &listBg);
-        for (size_t i = 0; i < snap.platforms.size(); ++i) {
+        for (size_t i = 0; i < listCount; ++i) {
             SDL_Rect r{ 64, 72 + static_cast<int>(i)*26, 520, 24 };
-            if ((int)i == selPlat)
+            if ((int)i == selPlatIdx)
                 SDL_SetRenderDrawColor(renderer, 70, 140, 240, 255);
             else
                 SDL_SetRenderDrawColor(renderer, 40, 70, 120, 200);
             SDL_RenderFillRect(renderer, &r);
-            drawText(renderer, r.x + 14, r.y + 6, ellipsize(snap.platforms[i].name, 40), fg, 2);
+            std::string label;
+            if (biosMode) {
+                const auto& row = snap.biosPlatforms[i];
+                label = row.name + "  (" + std::to_string(row.firmwareCount) + ")";
+            } else {
+                label = snap.platforms[i].name;
+            }
+            drawText(renderer, r.x + 14, r.y + 6, ellipsize(label, 40), fg, 2);
         }
     } else if (snap.view == Status::View::ROMS) {
         std::string platName = snap.currentPlatformName;
@@ -1516,17 +1564,9 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
             reach = snap.diagnosticsServerReachable ? "Reachable" : "Unreachable";
         }
 
+
         int y = box.y + 18;
         drawText(renderer, box.x + 16, y, "Config", fg, 2); y += 26;
-        drawText(renderer, box.x + 16, y, "Server: " + ellipsize(config.serverUrl, 58), sub, 2); y += 24;
-        drawText(renderer, box.x + 16, y, "DownloadDir: " + ellipsize(config.downloadDir, 50), sub, 2); y += 24;
-        drawText(renderer, box.x + 16, y,
-                 "Timeout: " + std::to_string(config.httpTimeoutSeconds) +
-                 "s  FAT32: " + std::string(config.fat32Safe ? "true" : "false") +
-                 "  Log: " + config.logLevel,
-                 sub, 2); y += 30;
-
-        drawText(renderer, box.x + 16, y, "Health", fg, 2); y += 26;
         drawText(renderer, box.x + 16, y, "Server: " + reach, sub, 2); y += 24;
         if (!snap.diagnosticsLastProbeDetail.empty()) {
             drawText(renderer, box.x + 16, y, "Probe: " + ellipsize(snap.diagnosticsLastProbeDetail, 62), sub, 2); y += 24;
@@ -1534,19 +1574,6 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
             drawText(renderer, box.x + 16, y, "Probe: (none yet)", sub, 2); y += 24;
         }
         drawText(renderer, box.x + 16, y, "SD Free: " + humanSize(freeBytes), sub, 2); y += 30;
-
-        drawText(renderer, box.x + 16, y, "Firmware", fg, 2); y += 26;
-        std::string fwPlatform = "(no platforms)";
-        if (!snap.platforms.empty() &&
-            snap.firmwarePlatformIndex >= 0 &&
-            snap.firmwarePlatformIndex < (int)snap.platforms.size()) {
-            fwPlatform = snap.platforms[(size_t)snap.firmwarePlatformIndex].name;
-        }
-        drawText(renderer, box.x + 16, y, "Platform: " + ellipsize(fwPlatform, 52),
-                 snap.firmwareBusy ? SDL_Color{255,210,160,255} : sub, 2); y += 24;
-        std::string fwStatus = snap.firmwareBusy ? "Checking firmware..." : snap.firmwareStatusText;
-        if (fwStatus.empty()) fwStatus = "(not synced yet)";
-        drawText(renderer, box.x + 16, y, ellipsize(fwStatus, 62), sub, 2); y += 30;
 
         drawText(renderer, box.x + 16, y, "Save Sync", fg, 2); y += 26;
         std::string ssState;
@@ -1556,7 +1583,7 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
             case romm::SavePairState::AwaitingApproval:
                 ssState = "Enter code: " + snap.savePairUserCode;
                 if (!snap.saveVerificationPath.empty())
-                    ssState += " at " + ellipsize(snap.saveVerificationPath, 24);
+                    ssState += " at " + ellipsize(snap.saveVerificationPath, 48);
                 break;
             case romm::SavePairState::Paired: ssState = "Paired"; break;
             case romm::SavePairState::Error:
@@ -1592,7 +1619,7 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
                  "A=export summary to log  B=back  R=refresh probe",
                  fg, 2);
         drawText(renderer, box.x + 16, box.y + box.h - 30,
-                 "\xE2\x97\x80\xE2\x96\xB6 platform  \xE2\x96\xBC sync saves  \xE2\x96\xB2 sync BIOS",
+                 "\xE2\x96\xBC sync saves",
                  fg, 2);
     } else if (snap.view == Status::View::UPDATER) {
         header = "UPDATER";
@@ -1657,7 +1684,100 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
         }
 
         drawText(renderer, box.x + 16, box.y + box.h - 52,
-                 "A=check updates  X=download update  B=back  Plus=exit",
+                 "A=check updates  X=download update  B=back",
+                 fg, 2);
+    } else if (snap.view == Status::View::LOGIN) {
+        header = "LOGIN";
+        SDL_Color fg{255,255,255,255};
+        SDL_Color sub{210,230,250,255};
+        SDL_Color warn{255,210,160,255};
+        SDL_Rect box{64, 96, 1280 - 128, 720 - 96 - 64 - 48};
+        SDL_SetRenderDrawColor(renderer, 20, 40, 70, 220);
+        SDL_RenderFillRect(renderer, &box);
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 90);
+        SDL_RenderDrawRect(renderer, &box);
+
+        int y = box.y + 18;
+        drawText(renderer, box.x + 16, y, "Pair with RomM (device login)", fg, 2); y += 26;
+        std::string ssState;
+        switch (snap.savePairState) {
+            case romm::SavePairState::Idle:
+                ssState = "Press A to start pairing.";
+                break;
+            case romm::SavePairState::Initiating:
+                ssState = "Requesting pairing code...";
+                break;
+            case romm::SavePairState::AwaitingApproval:
+                ssState = "Enter code: " + snap.savePairUserCode;
+                if (!snap.saveVerificationPath.empty())
+                    ssState += "  at " + ellipsize(snap.saveVerificationPath, 48);
+                break;
+            case romm::SavePairState::Paired:
+                ssState = "Paired!";
+                break;
+            case romm::SavePairState::Error:
+                ssState = "Error: " + ellipsize(snap.savePairDetail, 46);
+                break;
+        }
+        drawText(renderer, box.x + 16, y, ellipsize(ssState, 66),
+                 snap.saveBusy ? warn : sub, 2); y += 30;
+
+        if (!snap.saveStatusText.empty()) {
+            drawText(renderer, box.x + 16, y, ellipsize(snap.saveStatusText, 66), sub, 2); y += 24;
+        }
+        drawText(renderer, box.x + 16, box.y + box.h - 58,
+                 "A=start/retry pairing  B=back",
+                 fg, 2);
+    } else if (snap.view == Status::View::SETTINGS) {
+        header = "SETTINGS";
+        SDL_Color fg{255,255,255,255};
+        SDL_Color sub{200,220,240,255};
+        SDL_Color sel{140,220,160,255};
+        SDL_Rect box{64, 96, 1280 - 128, 720 - 96 - 64 - 48};
+        SDL_SetRenderDrawColor(renderer, 28, 34, 52, 220);
+        SDL_RenderFillRect(renderer, &box);
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 90);
+        SDL_RenderDrawRect(renderer, &box);
+
+        const char* rows[5] = {
+            "Sign in / Re-login",
+            nullptr, // Server URL (value appended below)
+            nullptr, // Username
+            nullptr, // Password
+            "Sign out",
+        };
+        std::string serverRow = std::string("Server URL: ") +
+                                (config.serverUrl.empty() ? "(not set)" : config.serverUrl);
+        std::string userRow = std::string("Username: ") +
+                              (config.username.empty() ? "(not set)" : config.username);
+        std::string passRow = std::string("Password: ") +
+                              (config.password.empty() ? "(not set)" : std::string(config.password.size(), '*'));
+        const std::string* rowValues[5] = {nullptr, &serverRow, &userRow, &passRow, nullptr};
+
+        int y = box.y + 18;
+        for (int i = 0; i < 5; ++i) {
+            // Row 4 (Sign out) only exists when a bearer token is active.
+            if (i == 4 && config.apiToken.empty()) continue;
+            std::string line = rows[i] ? std::string(rows[i]) : *rowValues[i];
+            drawText(renderer, box.x + 16, y,
+                     ((snap.selectedSettingsIndex == i) ? "> " : "  ") + line,
+                     (snap.selectedSettingsIndex == i) ? sel : sub, 2);
+            y += 26;
+        }
+        y += 6;
+        std::string authLine = "Auth: none";
+        if (!config.apiToken.empty()) authLine = "Auth: device (bearer)";
+        else if (!config.username.empty()) authLine = "Auth: basic (" + config.username + ")";
+        drawText(renderer, box.x + 16, y, authLine, sub, 2); y += 24;
+        if (!snap.settingsStatus.empty()) {
+            drawText(renderer, box.x + 16, y, ellipsize(snap.settingsStatus, 62),
+                     SDL_Color{255,210,160,255}, 2); y += 24;
+        }
+        y += 6;
+        drawText(renderer, box.x + 16, y, "Changes are saved to config.json on the SD card.", sub, 2);
+
+        drawText(renderer, box.x + 16, box.y + box.h - 58,
+                 "A=edit/activate  B=back",
                  fg, 2);
     } else if (snap.view == Status::View::ERROR) {
         header = "ERROR";
@@ -1745,44 +1865,48 @@ static void renderStatus(SDL_Renderer* renderer, const Status& status, const Con
 
         int hintY = box.y + box.h - 78;
         drawText(renderer, box.x + 16, hintY, "Check log: sdmc:/switch/romm_switch_client/log.txt", fg, 2);
-        drawText(renderer, box.x + 16, hintY + 26, "Press B or Plus to exit.", fg, 2);
+        drawText(renderer, box.x + 16, hintY + 26, "Press B or - to exit.", fg, 2);
     }
 
     switch (snap.view) {
         case Status::View::PLATFORMS:
-            controls = "A=open platform B=back Y=queue R=diagnostics L=updater Plus=exit D-Pad=scroll hold";
+            controls = "A=open Y=queue X=search ZR/ZL=idx R=diag L=updater -=quit +=settings";
             break;
         case Status::View::ROMS:
-            controls = "A=details B=back Y=queue Minus=search DPad L/R=filter/sort";
+            controls = "A=details B=back Y=queue X=search DPad L/R=filter/sort -=quit";
             break;
         case Status::View::DETAIL:
-            controls = "A=queue+open B=back Y=queue Plus=exit";
+            controls = "A=queue+open B=back Y=queue X=search -=quit";
             break;
         case Status::View::QUEUE:
             if (snap.queueReorderActive) {
-                controls = snap.downloadWorkerRunning
-                    ? "DPad=move A=drop B=drop Minus=delete X=view downloading Plus=exit"
-                    : "DPad=move A=drop B=drop Minus=delete X=start downloads Plus=exit";
+                controls = "DPad=move A=drop B=drop X=delete -=quit";
             } else {
                 controls = snap.downloadWorkerRunning
-                    ? "A=select DPad=scroll X=view downloading B=back Plus=exit"
-                    : "A=select DPad=scroll X=start downloads B=back Plus=exit";
+                    ? "A=select DPad=scroll X=view downloading B=back -=quit"
+                    : "A=select DPad=scroll X=start downloads B=back -=quit";
             }
             break;
         case Status::View::DOWNLOADING:
-            controls = snap.burnInMode ? "R=burn-in off B=back Plus=exit" : "R=burn-in B=back Plus=exit";
+            controls = snap.burnInMode ? "R=burn-in off B=back -=quit" : "R=burn-in B=back -=quit";
             break;
         case Status::View::ERROR:
-            controls = "B=exit Plus=exit";
+            controls = "B=exit -=quit";
             break;
         case Status::View::DIAGNOSTICS:
-            controls = "A=export summary  B=back  R=refresh  \xE2\x97\x80\xE2\x96\xB6 platform  \xE2\x96\xBC sync saves  \xE2\x96\xB2 sync BIOS";
+            controls = "A=export summary  B=back  R=refresh  \xE2\x96\xBC sync saves";
             break;
         case Status::View::UPDATER:
-            controls = "A=check X=download B=back Plus=exit";
+            controls = "A=check X=download B=back -=quit";
+            break;
+        case Status::View::SETTINGS:
+            controls = "B=back A=select/edit D-Pad=move -=quit";
+            break;
+        case Status::View::LOGIN:
+            controls = "B=back A=start/retry pairing -=quit";
             break;
         default:
-            controls = "Plus=exit";
+            controls = "-=quit";
             break;
     }
 
@@ -2007,19 +2131,23 @@ int main(int argc, char** argv) {
         std::string error;
         romm::ErrorInfo errorInfo{};
     };
-    struct FirmwareSyncReq {
+    struct BiosListReq {
         uint64_t generation{0};
-        std::string platformSlug;
         std::string platformId;
+        std::string platformSlug;
         std::string platformName;
     };
-    struct FirmwareSyncResultMsg {
+    struct BiosListResult {
         uint64_t generation{0};
-        std::string statusText;
+        std::string platformSlug;
+        std::string platformName;
+        std::vector<romm::Firmware> files;
+        std::string error;
     };
     struct SaveSyncReq {
         uint64_t generation{0};
         bool pair{false};          // true = run device-auth pairing before syncing
+        bool pairOnly{false};      // true = stop after pairing (LOGIN view flow)
         std::string serverUrl;
         std::string basicAuthRaw;  // "" when no credentials configured
         std::string savesRoot;
@@ -2040,8 +2168,8 @@ int main(int argc, char** argv) {
     romm::LatestJobWorker<DiagProbeReq, DiagProbeResult> diagProbeJobs;
     romm::LatestJobWorker<UpdateCheckReq, UpdateCheckResult> updateCheckJobs;
     romm::LatestJobWorker<UpdateDownloadReq, UpdateDownloadResult> updateDownloadJobs;
-    romm::LatestJobWorker<FirmwareSyncReq, FirmwareSyncResultMsg> firmwareSyncJobs;
-    uint64_t firmwareSyncGeneration = 0;
+    romm::LatestJobWorker<BiosListReq, BiosListResult> biosListJobs;
+    uint64_t biosListGeneration = 0;
     romm::LatestJobWorker<SaveSyncReq, SaveSyncResultMsg> saveSyncJobs;
     uint64_t saveSyncGeneration = 0;
     std::atomic<bool> saveCancel{false};
@@ -2427,21 +2555,23 @@ int main(int argc, char** argv) {
         }
         diagProbeJobs.submit(req);
     };
-
-    auto submitFirmwareSync = [&](const std::string& slug, const std::string& id, const std::string& name) {
-        FirmwareSyncReq req{};
+    // On-demand BIOS enqueue: fetch the platform's firmware list in the background,
+    // then build the bundle and push it into the standard download queue.
+    auto submitBiosList = [&](const std::string& id, const std::string& slug, const std::string& name) {
+        BiosListReq req{};
         {
             std::lock_guard<std::mutex> lock(status.mutex);
-            firmwareSyncGeneration++;
-            req.generation = firmwareSyncGeneration;
-            req.platformSlug = slug;
+            biosListGeneration++;
+            req.generation = biosListGeneration;
             req.platformId = id;
+            req.platformSlug = slug;
             req.platformName = name;
-            status.firmwareBusy.store(true);
-            status.firmwareStatusText = "Syncing firmware for " + name + "...";
-            status.firmwareList.clear();
+            status.netBusy.store(true);
+            status.netBusySinceMs.store(SDL_GetTicks());
+            status.netBusyWhat = "Checking BIOS...";
         }
-        firmwareSyncJobs.submit(req);
+        romm::logLine("BIOS: fetching firmware list for " + name);
+        biosListJobs.submit(req);
     };
 
     // ---- Save sync: pairing + sync job ----
@@ -2523,6 +2653,196 @@ int main(int argc, char** argv) {
             }
         }
         if (shouldSubmit) saveSyncJobs.submit(req);
+    };
+
+    // LOGIN view: fresh device-code pairing only (no save-sync phase). The
+    // worker posts Paired to status; the UI thread applies the new token to
+    // config and navigates back (see the saveSyncJobs.pollResult block).
+    auto submitLoginPairing = [&]() {
+        SaveSyncReq req{};
+        bool shouldSubmit = false;
+        {
+            std::lock_guard<std::mutex> lock(status.mutex);
+            if (status.saveBusy.load()) {
+                romm::logLine("LOGIN: pairing already in flight, ignoring A");
+                return;
+            }
+            saveCancel.store(false);
+            saveSyncGeneration++;
+            req.generation = saveSyncGeneration;
+            req.pair = true;
+            req.pairOnly = true;
+            req.serverUrl = config.serverUrl;
+            req.basicAuthRaw = romm::basicAuthHeader(config);
+            req.savesRoot = romm::effectiveSaveDir(config);
+            req.statesRoot = romm::effectiveStatesDir(config);
+            req.timeoutSeconds = config.httpTimeoutSeconds;
+            req.clientDeviceId = saveMakeDeviceId();
+            status.savePairState = romm::SavePairState::Initiating;
+            status.savePairDetail.clear();
+            status.savePairUserCode.clear();
+            status.saveVerificationPath.clear();
+            status.saveBusy.store(true);
+            shouldSubmit = true;
+        }
+        if (shouldSubmit) saveSyncJobs.submit(req);
+    };
+
+    // ROM search prompt: keyboard -> apply query filter; remote search for
+    // large platforms. Shared by X on index views (PLATFORMS/ROMS/DETAIL).
+    auto runRomSearchPrompt = [&]() {
+        std::string curQuery;
+        std::string platformId;
+        size_t romCount = 0;
+        {
+            std::lock_guard<std::mutex> lock(status.mutex);
+            curQuery = status.romSearchQuery;
+            platformId = status.currentPlatformId;
+            romCount = status.romsAll.size();
+        }
+        std::string next = curQuery;
+        if (promptSearchQuery(next)) {
+            next = normalizeSearchText(next);
+            bool submitRemote = false;
+            PendingRemoteSearch req;
+            if (next != curQuery) {
+                {
+                    std::lock_guard<std::mutex> lock(status.mutex);
+                    status.romSearchQuery = next;
+                    status.romListOptionsRevision++;
+                    status.selectedRomIndex = 0;
+                    if (next.empty()) {
+                        remoteSearchActive = false;
+                    } else if (!platformId.empty() && romCount >= kRemoteSearchThreshold) {
+                        req.pid = platformId;
+                        req.query = next;
+                        req.limit = kRemoteSearchLimit;
+                        submitRemote = true;
+                    } else {
+                        remoteSearchActive = false;
+                        remoteSearchGames.clear();
+                        remoteSearchQuery.clear();
+                        remoteSearchPlatformId.clear();
+                        remoteSearchRevision++;
+                    }
+                }
+                if (submitRemote) {
+                    submitRemoteSearch(req);
+                }
+                romm::logLine("ROM search updated: " + (next.empty() ? std::string("<cleared>") : next));
+            }
+        }
+    };
+
+    // SETTINGS rows: 0 sign in / 1 server URL / 2 username / 3 password / 4 sign out.
+    // Credentials persist to config.json; edits clear cached platform/ROM data
+    // and re-fetch so the new URL/auth applies without restart.
+    auto runSettingsAction = [&]() {
+        int row = 0;
+        {
+            std::lock_guard<std::mutex> lock(status.mutex);
+            row = status.selectedSettingsIndex;
+        }
+        if (row == 0) {
+            // Sign in / Re-login: enter LOGIN and auto-start pairing.
+            {
+                std::lock_guard<std::mutex> lock(status.mutex);
+                status.prevLoginView = status.currentView;
+                status.currentView = Status::View::LOGIN;
+                if (!status.saveBusy.load()) {
+                    status.savePairState = romm::SavePairState::Idle;
+                    status.savePairDetail.clear();
+                }
+            }
+            gViewTraceFrames = 8;
+            submitLoginPairing();
+            return;
+        }
+        if (row >= 1 && row <= 3) {
+            const char* header = row == 1 ? "Server URL" : row == 2 ? "Username" : "Password";
+            const char* guide = row == 1 ? "http://host[:port] (blank clears)"
+                              : row == 2 ? "Enter username (blank clears)"
+                                         : "Enter password (blank clears)";
+            std::string value = (row == 1) ? config.serverUrl
+                              : (row == 2) ? config.username
+                                           : config.password;
+            if (!promptText(header, guide, value)) return; // cancelled
+            if (row == 1 && !value.empty() && value.rfind("http://", 0) != 0) {
+                std::lock_guard<std::mutex> lock(status.mutex);
+                status.settingsStatus = "Server URL must start with http://";
+                romm::logLine("SETTINGS: rejected non-http server URL: " + value);
+                return;
+            }
+            if (row == 1) config.serverUrl = value;
+            else if (row == 2) config.username = value;
+            else config.password = value;
+            std::string saveErr;
+            if (!romm::saveConfigJson(config, saveErr)) {
+                romm::logLine("SETTINGS: config.json write failed: " + saveErr);
+                std::lock_guard<std::mutex> lock(status.mutex);
+                status.settingsStatus = "Save failed: " + saveErr;
+                return;
+            }
+            romm::logLine(std::string("SETTINGS: saved ") + header + " to config.json");
+            {
+                std::lock_guard<std::mutex> lock(status.mutex);
+                // Live effect: drop stale platform/ROM state; next fetch uses
+                // the new URL/credentials. Bearer token is untouched.
+                status.platforms.clear();
+                status.roms.clear();
+                status.romsAll.clear();
+                status.romsRevision++;
+                status.romsAllRevision++;
+                status.romFetchGeneration++;
+                status.selectedPlatformIndex = 0;
+                status.selectedRomIndex = 0;
+                resetNav();
+                status.settingsStatus = std::string(header) + " saved";
+                status.currentView = Status::View::PLATFORMS;
+            }
+            gViewTraceFrames = 8;
+            // Re-fetch platforms with the new config (sync, same as startup).
+            remoteSearchActive = false;
+            remoteSearchGames.clear();
+            std::string fetchErr;
+            romm::ErrorInfo fetchInfo;
+            {
+                std::lock_guard<std::mutex> lock(status.mutex);
+                status.netBusy.store(true);
+                status.netBusyWhat = "Platforms";
+            }
+            if (!romm::fetchPlatforms(config, status, fetchErr, &fetchInfo)) {
+                std::lock_guard<std::mutex> lock(status.mutex);
+                status.lastError = fetchErr;
+                status.lastErrorInfo = fetchInfo;
+                status.netBusy.store(false);
+                status.currentView = Status::View::ERROR;
+            } else {
+                std::lock_guard<std::mutex> lock(status.mutex);
+                status.netBusy.store(false);
+            }
+            return;
+        }
+        if (row == 4) {
+            // Sign out: drop the paired device token; Basic auth applies on the
+            // next request.
+            if (config.apiToken.empty()) {
+                std::lock_guard<std::mutex> lock(status.mutex);
+                status.settingsStatus = "Not paired (no device token).";
+                return;
+            }
+            if (std::remove(romm::kDeviceTokenPath) == 0) {
+                romm::logLine("SETTINGS: signed out (device_token.json removed)");
+            } else {
+                romm::logLine("SETTINGS: token file remove failed; clearing in-memory token anyway");
+            }
+            config.apiToken.clear();
+            std::lock_guard<std::mutex> lock(status.mutex);
+            status.settingsStatus = "Signed out; Basic auth applies.";
+            // Row 4 hides without a token; keep the cursor on a rendered row.
+            status.selectedSettingsIndex = 0;
+            return;
+        }
     };
 
     // Run the sync phase (scan -> negotiate -> execute ops). Shared by the
@@ -2746,30 +3066,16 @@ int main(int argc, char** argv) {
         out.generation = req.generation;
         return out;
     });
-    firmwareSyncJobs.start([&](const FirmwareSyncReq& req) -> FirmwareSyncResultMsg {
-        FirmwareSyncResultMsg out;
+    biosListJobs.start([&](const BiosListReq& req) -> BiosListResult {
+        BiosListResult out;
         out.generation = req.generation;
-        romm::FirmwareSyncResult result;
+        out.platformSlug = req.platformSlug;
+        out.platformName = req.platformName;
         std::string err;
-        std::string progressText;
-        bool ok = romm::syncFirmwareForPlatform(
-            config, req.platformSlug, req.platformId,
-            [&](const std::string& msg) { progressText = msg; },
-            result, err);
-        std::string summary = std::to_string(result.downloaded) + " downloaded, " +
-                              std::to_string(result.skipped) + " skipped, " +
-                              std::to_string(result.failed) + " failed";
-        out.statusText = summary;
-        if (!ok) out.statusText += "  " + (err.empty() ? std::string("(error)") : err);
-        {
-            std::lock_guard<std::mutex> lock(status.mutex);
-            if (req.generation == firmwareSyncGeneration) {
-                status.firmwareStatusText = summary;
-                if (!ok) status.firmwareStatusText += "  " + err;
-                status.firmwareBusy.store(false);
-            }
-        }
-        romm::logLine("FW: sync finished for " + req.platformName + " - " + summary);
+        romm::fetchFirmware(config, req.platformId, out.files, err);
+        out.error = err;
+        romm::logLine("BIOS: listed " + std::to_string(out.files.size()) +
+                      " firmware file(s) for " + req.platformName);
         return out;
     });
     saveSyncJobs.start([&](const SaveSyncReq& req) -> SaveSyncResultMsg {
@@ -2790,7 +3096,6 @@ int main(int argc, char** argv) {
                 romm::HttpRequestOptions opt;
                 opt.timeoutSec = (req.timeoutSeconds > 0) ? req.timeoutSeconds : 20;
                 opt.keepAlive = false;
-                opt.decodeChunked = true;
                 opt.requestBody = body;
                 opt.requestBodySize = bodySize;
                 romm::HttpTransaction tx;
@@ -2883,9 +3188,18 @@ int main(int argc, char** argv) {
                 }
                 long interval = initResp.interval >= 3 ? initResp.interval : 3;
                 std::string userCode = initResp.userCode;
+                // Join the server origin with the best verification path so the UI
+                // shows an absolute URL: complete form (/pair/device?user_code=…)
+                // when provided, else the plain path, else /pair/device.
                 std::string verifyPath = initResp.verificationPathComplete
-                    ? (initResp.verificationPath.empty() ? std::string("/pair") : initResp.verificationPath)
-                    : std::string("/pair");
+                    ? initResp.verificationUrlComplete
+                    : (!initResp.verificationPath.empty() ? initResp.verificationPath
+                                                          : std::string("/pair/device"));
+                {
+                    std::string origin = config.serverUrl;
+                    while (!origin.empty() && origin.back() == '/') origin.pop_back();
+                    verifyPath = origin + verifyPath;
+                }
                 postSaveStatus(req, [&] {
                     status.savePairState = romm::SavePairState::AwaitingApproval;
                     status.savePairUserCode = userCode;
@@ -2960,6 +3274,16 @@ int main(int argc, char** argv) {
                 }
             }
         }
+        if (req.pairOnly) {
+            // LOGIN view flow: token is persisted above; stop before syncing.
+            postSaveStatus(req, [&] {
+                status.savePairState = romm::SavePairState::Paired;
+                status.saveStatusText.clear();
+                status.lastError.clear();
+            });
+            out.paired = true;
+            return out;
+        }
 
         // --- Sync phase ---
         bool failed = false;
@@ -2974,7 +3298,6 @@ int main(int argc, char** argv) {
         romm::HttpRequestOptions opt;
         opt.timeoutSec = (config.httpTimeoutSeconds > 0) ? config.httpTimeoutSeconds : 20;
         opt.keepAlive = true;
-        opt.decodeChunked = true;
         opt.maxBodyBytes = 2 * 1024 * 1024;
 
         std::vector<std::pair<std::string, std::string>> headers;
@@ -3039,7 +3362,6 @@ int main(int argc, char** argv) {
         romm::HttpRequestOptions opt;
         opt.timeoutSec = (config.httpTimeoutSeconds > 0) ? config.httpTimeoutSeconds : 20;
         opt.keepAlive = false;
-        opt.decodeChunked = true;
         opt.followRedirects = true; // GitHub asset downloads commonly redirect to a CDN host
 
         std::vector<std::pair<std::string, std::string>> headers;
@@ -3231,6 +3553,16 @@ int main(int argc, char** argv) {
         romm::logLine(" server_url=" + config.serverUrl);
         romm::logLine(" download_dir=" + config.downloadDir);
         romm::logLine(std::string(" fat32_safe=") + (config.fat32Safe ? "true" : "false"));
+
+        // Prefer a previously paired device token (device_token.json) for API
+        // auth; Basic credentials from .env/config.json remain as fallback.
+        {
+            romm::DeviceToken tok;
+            if (romm::loadDeviceToken(romm::kDeviceTokenPath, tok)) {
+                config.apiToken = tok.accessToken;
+                romm::logLine("Using paired device token for API auth.");
+            }
+        }
 
         // Updater storage lives under the download cache root to keep /switch tidy.
         // We also keep a fixed pending pointer file under /switch/romm_switch_client/.
@@ -3563,15 +3895,34 @@ int main(int argc, char** argv) {
                     : probe->detail + " (" + romm::errorCodeLabel(probe->errorInfo.code) + ")";
             }
         }
-        if (auto fwDone = firmwareSyncJobs.pollResult()) {
-            // The worker body already posted the final status text and cleared
-            // firmwareBusy under status.mutex; this just consumes the result slot.
-            (void)fwDone;
-        }
         if (auto saveDone = saveSyncJobs.pollResult()) {
             // The worker body already posted the final status text and cleared
             // saveBusy under status.mutex; this just consumes the result slot.
             (void)saveDone;
+        }
+        // LOGIN auto-nav: a pairOnly job completed and posted Paired while the
+        // LOGIN view is on screen -> adopt the token and return to where the
+        // flow started. (Worker already persisted device_token.json.)
+        {
+            bool loginPaired = false;
+            {
+                std::lock_guard<std::mutex> lock(status.mutex);
+                loginPaired = (status.currentView == Status::View::LOGIN &&
+                               status.savePairState == romm::SavePairState::Paired &&
+                               !status.saveBusy.load());
+            }
+            if (loginPaired) {
+                romm::DeviceToken tok;
+                if (romm::loadDeviceToken(romm::kDeviceTokenPath, tok)) {
+                    config.apiToken = tok.accessToken;
+                }
+                std::lock_guard<std::mutex> lock(status.mutex);
+                const Status::View dest = status.prevLoginView;
+                status.currentView = dest;
+                romm::logLine(std::string("LOGIN: paired; token active for API auth. Back to ") +
+                              viewName(dest) + ".");
+                gViewTraceFrames = 8;
+            }
         }
         if (auto upd = updateCheckJobs.pollResult()) {
             std::lock_guard<std::mutex> lock(status.mutex);
@@ -3636,10 +3987,18 @@ int main(int argc, char** argv) {
         // Adjust selection index based on current view (platforms/roms/queue)
         auto adjustSelection = [&](int dir) {
             std::lock_guard<std::mutex> lock(status.mutex);
-            if (status.currentView == Status::View::PLATFORMS) {
+            if (status.currentView == Status::View::PLATFORMS &&
+                status.platformIndexMode == Status::PlatformIndexMode::Bios) {
+                int biosCount = 0;
+                for (const auto& p : status.platforms)
+                    if (p.firmwareCount > 0) biosCount++;
+                status.selectedBiosPlatformIndex = std::max(0, std::min(biosCount - 1, status.selectedBiosPlatformIndex + dir));
+            } else if (status.currentView == Status::View::PLATFORMS) {
                 status.selectedPlatformIndex = std::max(0, std::min((int)status.platforms.size() - 1, status.selectedPlatformIndex + dir));
             } else if (status.currentView == Status::View::ROMS || status.currentView == Status::View::DETAIL) {
                 status.selectedRomIndex = std::max(0, std::min((int)status.roms.size() - 1, status.selectedRomIndex + dir));
+            } else if (status.currentView == Status::View::SETTINGS) {
+                status.selectedSettingsIndex = std::max(0, std::min(4, status.selectedSettingsIndex + dir));
             } else if (status.currentView == Status::View::QUEUE) {
                 if (status.queueReorderActive) {
                     if (status.downloadQueue.empty()) return;
@@ -3685,8 +4044,57 @@ int main(int argc, char** argv) {
             status.totalDownloadBytes.store(already + remaining);
         };
 
-        {
-            std::lock_guard<std::mutex> lock(status.mutex);
+        if (auto biosDone = biosListJobs.pollResult()) {
+            std::unique_lock<std::mutex> lock(status.mutex);
+            status.netBusy.store(false);
+            status.netBusyWhat.clear();
+            if (biosDone->generation == biosListGeneration) {
+                const std::string biosId = std::string("__bios__") + biosDone->platformSlug;
+                if (!biosDone->error.empty()) {
+                    romm::logLine("BIOS: list failed for " + biosDone->platformName + ": " + biosDone->error);
+                } else if (biosDone->files.empty()) {
+                    romm::logLine("BIOS: no firmware files reported for " + biosDone->platformName);
+                } else {
+                    romm::DownloadBundle bundle = romm::buildFirmwareBundle(
+                        biosDone->platformSlug, biosDone->platformName,
+                        biosDone->files, config.serverUrl);
+                    romm::Game biosGame;
+                    biosGame.id = biosId;
+                    biosGame.title = bundle.title;
+                    biosGame.platformSlug = biosDone->platformSlug;
+                    biosGame.sizeBytes = bundle.totalSize();
+                    // canEnqueueGame locks status.mutex internally; drop ours first.
+                    lock.unlock();
+                    const bool alreadyQueued = !romm::canEnqueueGame(status, biosGame);
+                    lock.lock();
+                    // Re-enqueue allowed after failure; dedupe matches ROM behavior.
+                    if (alreadyQueued) {
+                        romm::logLine("BIOS already queued this session: " + biosGame.title);
+                    } else {
+                        romm::QueueItem qi;
+                        qi.game = biosGame;
+                        qi.bundle = bundle;
+                        qi.state = romm::QueueState::Pending;
+                        status.downloadQueue.push_back(std::move(qi));
+                        status.downloadQueueRevision++;
+                        status.selectedQueueIndex = 0;
+                        status.queueReorderActive = false;
+                        status.downloadCompleted = false;
+                    }
+                    lock.unlock();
+                    recomputeTotals();
+                    persistQueueState();
+                    lock.lock();
+                    status.prevQueueView = Status::View::PLATFORMS;
+                    status.currentView = Status::View::QUEUE;
+                    viewChangedThisFrame = true;
+                }
+            }
+        }
+        SDL_Event e;
+        while (!viewChangedThisFrame && SDL_PollEvent(&e)) {
+            {
+                std::lock_guard<std::mutex> lock(status.mutex);
             if (!status.workerEvents.empty()) {
                 for (const auto& ev : status.workerEvents) {
                     if (ev.type == romm::WorkerEventType::DownloadFailureState) {
@@ -3699,11 +4107,9 @@ int main(int argc, char** argv) {
                 status.workerEvents.clear();
                 status.workerEventsRevision++;
             }
-        }
+            }
 
-        SDL_Event e;
-        // Handle input events until a view change occurs (then render the new view before more input)
-        while (!viewChangedThisFrame && SDL_PollEvent(&e)) {
+
             romm::Action act = romm::translateEvent(e);
             if (act != romm::Action::None) {
                 romm::logDebug("Input action: " + std::to_string(static_cast<int>(act)), "INPUT");
@@ -3715,31 +4121,6 @@ int main(int argc, char** argv) {
                     romm::stopDownloadWorker();
                     break;
                 case romm::Action::Up: {
-                    // Up in DIAGNOSTICS triggers a firmware (BIOS) sync for the
-                    // currently selected platform.
-                    bool inDiagnostics = false;
-                    std::string fwSlug, fwId, fwName;
-                    {
-                        std::lock_guard<std::mutex> lock(status.mutex);
-                        inDiagnostics = (status.currentView == Status::View::DIAGNOSTICS);
-                        if (inDiagnostics && !status.platforms.empty() &&
-                            status.firmwarePlatformIndex >= 0 &&
-                            status.firmwarePlatformIndex < (int)status.platforms.size()) {
-                            int i = status.firmwarePlatformIndex;
-                            fwSlug = status.platforms[(size_t)i].slug;
-                            fwId = status.platforms[(size_t)i].id;
-                            fwName = status.platforms[(size_t)i].name;
-                        }
-                    }
-                    if (inDiagnostics) {
-                        if (!fwId.empty() && !status.firmwareBusy.exchange(true)) {
-                            submitFirmwareSync(fwSlug, fwId, fwName);
-                            viewChangedThisFrame = true;
-                        } else if (fwId.empty()) {
-                            romm::logLine("FW: no platform selected to sync");
-                        }
-                        break;
-                    }
                     adjustSelection(-1);
                     scrollHold.dir = -1;
                     scrollHold.nextMs = SDL_GetTicks() + 240;
@@ -3765,16 +4146,9 @@ int main(int argc, char** argv) {
                 }
                 case romm::Action::Left: {
                     bool changed = false;
-                    std::string fwName; // for the log line after unlock
                     {
                         std::lock_guard<std::mutex> lock(status.mutex);
-                        if (status.currentView == Status::View::DIAGNOSTICS && !status.platforms.empty()) {
-                            status.firmwarePlatformIndex--;
-                            if (status.firmwarePlatformIndex < 0)
-                                status.firmwarePlatformIndex = (int)status.platforms.size() - 1;
-                            fwName = status.platforms[(size_t)status.firmwarePlatformIndex].name;
-                            changed = true;
-                        } else if (status.currentView == Status::View::ROMS) {
+                        if (status.currentView == Status::View::ROMS) {
                             switch (status.romFilter) {
                                 case romm::RomFilter::All: status.romFilter = romm::RomFilter::Queued; break;
                                 case romm::RomFilter::Queued: status.romFilter = romm::RomFilter::Resumable; break;
@@ -3788,24 +4162,15 @@ int main(int argc, char** argv) {
                         }
                     }
                     if (changed) {
-                        romm::logLine(fwName.empty()
-                            ? std::string("ROM filter -> ") + romFilterLabel(status.romFilter)
-                            : std::string("FW platform -> ") + fwName);
+                        romm::logLine(std::string("ROM filter -> ") + romFilterLabel(status.romFilter));
                     }
                     break;
                 }
                 case romm::Action::Right: {
                     bool changed = false;
-                    std::string fwName;
                     {
                         std::lock_guard<std::mutex> lock(status.mutex);
-                        if (status.currentView == Status::View::DIAGNOSTICS && !status.platforms.empty()) {
-                            status.firmwarePlatformIndex++;
-                            if (status.firmwarePlatformIndex >= (int)status.platforms.size())
-                                status.firmwarePlatformIndex = 0;
-                            fwName = status.platforms[(size_t)status.firmwarePlatformIndex].name;
-                            changed = true;
-                        } else if (status.currentView == Status::View::ROMS) {
+                        if (status.currentView == Status::View::ROMS) {
                             switch (status.romSort) {
                                 case romm::RomSort::TitleAsc: status.romSort = romm::RomSort::TitleDesc; break;
                                 case romm::RomSort::TitleDesc: status.romSort = romm::RomSort::SizeDesc; break;
@@ -3817,9 +4182,7 @@ int main(int argc, char** argv) {
                         }
                     }
                     if (changed) {
-                        romm::logLine(fwName.empty()
-                            ? std::string("ROM sort -> ") + romSortLabel(status.romSort)
-                            : std::string("FW platform -> ") + fwName);
+                        romm::logLine(std::string("ROM sort -> ") + romSortLabel(status.romSort));
                     }
                     break;
                 }
@@ -3833,6 +4196,14 @@ int main(int argc, char** argv) {
                     if (currentView == Status::View::UPDATER) {
                         submitUpdateCheck();
                         viewChangedThisFrame = true;
+                        break;
+                    }
+                    if (currentView == Status::View::LOGIN) {
+                        submitLoginPairing();
+                        break;
+                    }
+                    if (currentView == Status::View::SETTINGS) {
+                        runSettingsAction();
                         break;
                     }
                     if (currentView == Status::View::QUEUE) {
@@ -3876,16 +4247,48 @@ int main(int argc, char** argv) {
                         break;
                     }
                     if (currentView == Status::View::PLATFORMS) {
+                        bool biosMode = false;
                         int sel = -1;
                         std::string pid;
                         {
                             std::lock_guard<std::mutex> lock(status.mutex);
+                            biosMode = (status.platformIndexMode == Status::PlatformIndexMode::Bios);
                             if (!status.platforms.empty() &&
                                 status.selectedPlatformIndex >= 0 &&
                                 status.selectedPlatformIndex < (int)status.platforms.size()) {
                                 sel = status.selectedPlatformIndex;
-                                pid = status.platforms[sel].id;
+                                pid = status.platforms[(size_t)sel].id;
                             }
+                        }
+                        if (biosMode) {
+                            // BIOS index: enqueue the selected platform's firmware
+                            // through the standard download queue; no view change.
+                            std::string bid;
+                            std::string bslug;
+                            std::string bname;
+                            {
+                                std::lock_guard<std::mutex> lock(status.mutex);
+                                int count = 0;
+                                for (const auto& p : status.platforms) {
+                                    if (p.firmwareCount <= 0) continue;
+                                    if (count == status.selectedBiosPlatformIndex) {
+                                        bid = p.id;
+                                        bslug = p.slug;
+                                        bname = p.name;
+                                        break;
+                                    }
+                                    count++;
+                                }
+                            }
+                            if (bid.empty()) {
+                                romm::logLine("Select on BIOS index but platform out of range.");
+                            } else if (biosListJobs.busy()) {
+                                romm::logLine("BIOS list already in flight.");
+                            } else {
+                                submitBiosList(bid, bslug, bname);
+                            }
+                            viewChangedThisFrame = true;
+                            break;
                         }
                         if (sel < 0 || pid.empty()) {
                             romm::logLine("Select on PLATFORMS but index out of range.");
@@ -4090,90 +4493,6 @@ int main(int argc, char** argv) {
                     }
                     break;
                 }
-                case romm::Action::OpenSearch: {
-                    // Minus: ROM search (ROMS view) OR queue delete (QUEUE view when reorder-active).
-                    {
-                        bool didDelete = false;
-                        std::string deletedTitle;
-                        {
-                            std::lock_guard<std::mutex> lock(status.mutex);
-                            if (status.currentView == Status::View::QUEUE && status.queueReorderActive) {
-                                int idx = status.selectedQueueIndex;
-                                if (idx >= 0 && idx < (int)status.downloadQueue.size()) {
-                                    const auto& qi = status.downloadQueue[(size_t)idx];
-                                    if (qi.state == romm::QueueState::Pending) {
-                                        deletedTitle = qi.game.title;
-                                        status.downloadQueue.erase(status.downloadQueue.begin() + idx);
-                                        status.downloadQueueRevision++;
-                                        status.queueReorderActive = false;
-                                        if (status.selectedQueueIndex >= (int)status.downloadQueue.size()) {
-                                            status.selectedQueueIndex = status.downloadQueue.empty() ? 0 : (int)status.downloadQueue.size() - 1;
-                                        }
-                                        didDelete = true;
-                                    } else {
-                                        romm::logLine("Queue delete ignored (only pending items can be removed).");
-                                    }
-                                }
-                            }
-                        }
-                        if (didDelete) {
-                            recomputeTotals();
-                            persistQueueState();
-                            romm::logLine("Removed from queue: " + deletedTitle);
-                        }
-                        if (didDelete) break;
-                    }
-
-                    std::string curQuery;
-                    bool inRoms = false;
-                    std::string platformId;
-                    size_t romCount = 0;
-                    {
-                        std::lock_guard<std::mutex> lock(status.mutex);
-                        inRoms = (status.currentView == Status::View::ROMS);
-                        curQuery = status.romSearchQuery;
-                        platformId = status.currentPlatformId;
-                        romCount = status.romsAll.size();
-                    }
-                    if (!inRoms) break;
-                    std::string next = curQuery;
-                    if (promptSearchQuery(next)) {
-                        next = normalizeSearchText(next);
-                        bool submitRemote = false;
-                        PendingRemoteSearch req;
-                        if (next != curQuery) {
-                            {
-                                std::lock_guard<std::mutex> lock(status.mutex);
-                                status.romSearchQuery = next;
-                                status.romListOptionsRevision++;
-                                status.selectedRomIndex = 0;
-                                if (next.empty()) {
-                                    remoteSearchActive = false;
-                                    remoteSearchGames.clear();
-                                    remoteSearchQuery.clear();
-                                    remoteSearchPlatformId.clear();
-                                    remoteSearchRevision++;
-                                } else if (!platformId.empty() && romCount >= kRemoteSearchThreshold) {
-                                    req.pid = platformId;
-                                    req.query = next;
-                                    req.limit = kRemoteSearchLimit;
-                                    submitRemote = true;
-                                } else {
-                                    remoteSearchActive = false;
-                                    remoteSearchGames.clear();
-                                    remoteSearchQuery.clear();
-                                    remoteSearchPlatformId.clear();
-                                    remoteSearchRevision++;
-                                }
-                            }
-                            if (submitRemote) {
-                                submitRemoteSearch(req);
-                            }
-                            romm::logLine("ROM search updated: " + (next.empty() ? std::string("<cleared>") : next));
-                        }
-                    }
-                    break;
-                }
                 case romm::Action::OpenDiagnostics: {
                     {
                         bool toggled = false;
@@ -4222,6 +4541,25 @@ int main(int argc, char** argv) {
                     }
                     break;
                 }
+                case romm::Action::OpenSettings: {
+                    bool opened = false;
+                    {
+                        std::lock_guard<std::mutex> lock(status.mutex);
+                        // Plus opens SETTINGS from PLATFORMS (gated like
+                        // diagnostics/updater to keep other views' footers simple).
+                        if (status.currentView == Status::View::PLATFORMS) {
+                            status.prevSettingsView = status.currentView;
+                            status.currentView = Status::View::SETTINGS;
+                            opened = true;
+                        }
+                    }
+                    if (opened) {
+                        romm::logLine("Opened SETTINGS view.");
+                        gViewTraceFrames = 6;
+                        viewChangedThisFrame = true;
+                    }
+                    break;
+                }
                 case romm::Action::Back: {
                     // B/Back: navigate up one level or return from queue
                     Status::View cur;
@@ -4243,7 +4581,13 @@ int main(int argc, char** argv) {
                             remoteSearchJobs.clearPending();
                             romm::logLine("Cancelled ROM fetch.");
                             viewChangedThisFrame = true;
-                        } else
+                        } else if (cur == Status::View::PLATFORMS &&
+                                   status.platformIndexMode == Status::PlatformIndexMode::Bios) {
+                            // B on the BIOS index returns to the ROM index.
+                            status.platformIndexMode = Status::PlatformIndexMode::Rom;
+                            romm::logLine("Back: BIOS -> ROM index.");
+                            viewChangedThisFrame = true;
+                        }
                         if (cur == Status::View::ROMS) {
                             status.currentView = Status::View::PLATFORMS;
                             remoteSearchActive = false;
@@ -4283,7 +4627,7 @@ int main(int argc, char** argv) {
                                 viewChangedThisFrame = true;
                             }
                         } else if (cur == Status::View::PLATFORMS) {
-                            romm::logLine("Back on PLATFORMS ignored.");
+                            romm::logLine("Back on ROM index ignored.");
                         } else if (cur == Status::View::DIAGNOSTICS) {
                             // Leaving DIAGNOSTICS aborts any in-flight pair/sync job.
                             saveCancel.store(true);
@@ -4295,6 +4639,19 @@ int main(int argc, char** argv) {
                             status.currentView = status.prevUpdaterView;
                             gViewTraceFrames = 8;
                             romm::logLine(std::string("Back from UPDATER to ") + viewName(status.currentView) + ".");
+                            viewChangedThisFrame = true;
+                        } else if (cur == Status::View::SETTINGS) {
+                            status.currentView = status.prevSettingsView;
+                            gViewTraceFrames = 8;
+                            romm::logLine(std::string("Back from SETTINGS to ") + viewName(status.currentView) + ".");
+                            viewChangedThisFrame = true;
+                        } else if (cur == Status::View::LOGIN) {
+                            // Leaving LOGIN aborts any in-flight pairing job.
+                            saveCancel.store(true);
+                            status.currentView = status.prevLoginView;
+                            status.savePairState = romm::SavePairState::Idle;
+                            gViewTraceFrames = 8;
+                            romm::logLine(std::string("Back from LOGIN to ") + viewName(status.currentView) + ".");
                             viewChangedThisFrame = true;
                         } else if (cur == Status::View::ERROR) {
                             running = false;
@@ -4325,13 +4682,54 @@ int main(int argc, char** argv) {
                 case romm::Action::StartDownload:
                     {
                         Status::View v;
+                        bool reorderActive = false;
+                        size_t romsLoaded = 0;
                         {
                             std::lock_guard<std::mutex> lock(status.mutex);
                             v = status.currentView;
+                            reorderActive = status.queueReorderActive;
+                            romsLoaded = status.romsAll.size();
                         }
                         if (v == Status::View::UPDATER) {
                             submitUpdateDownload();
                             viewChangedThisFrame = true;
+                            break;
+                        }
+                        // X on index views: open the ROM search keyboard.
+                        // PLATFORMS needs a platform's ROMs already loaded.
+                        if (v == Status::View::ROMS || v == Status::View::DETAIL ||
+                            (v == Status::View::PLATFORMS && romsLoaded > 0)) {
+                            runRomSearchPrompt();
+                            break;
+                        }
+                        // X in QUEUE reorder mode: delete the selected pending item.
+                        if (v == Status::View::QUEUE && reorderActive) {
+                            bool didDelete = false;
+                            std::string deletedTitle;
+                            {
+                                std::lock_guard<std::mutex> lock(status.mutex);
+                                int idx = status.selectedQueueIndex;
+                                if (idx >= 0 && idx < (int)status.downloadQueue.size()) {
+                                    const auto& qi = status.downloadQueue[(size_t)idx];
+                                    if (qi.state == romm::QueueState::Pending) {
+                                        deletedTitle = qi.game.title;
+                                        status.downloadQueue.erase(status.downloadQueue.begin() + idx);
+                                        status.downloadQueueRevision++;
+                                        status.queueReorderActive = false;
+                                        if (status.selectedQueueIndex >= (int)status.downloadQueue.size()) {
+                                            status.selectedQueueIndex = status.downloadQueue.empty() ? 0 : (int)status.downloadQueue.size() - 1;
+                                        }
+                                        didDelete = true;
+                                    } else {
+                                        romm::logLine("Queue delete ignored (only pending items can be removed).");
+                                    }
+                                }
+                            }
+                            if (didDelete) {
+                                recomputeTotals();
+                                persistQueueState();
+                                romm::logLine("Removed from queue: " + deletedTitle);
+                            }
                             break;
                         }
                     }
@@ -4386,6 +4784,27 @@ int main(int argc, char** argv) {
                         }
                     }
                     break;
+                case romm::Action::CycleIndexForward:
+                case romm::Action::CycleIndexBackward: {
+                    // ZR/ZL: toggle the PLATFORMS index between ROM and BIOS modes.
+                    bool isPlatforms = false;
+                    Status::PlatformIndexMode newMode = Status::PlatformIndexMode::Rom;
+                    {
+                        std::lock_guard<std::mutex> lock(status.mutex);
+                        isPlatforms = (status.currentView == Status::View::PLATFORMS);
+                        if (isPlatforms) {
+                            newMode = (status.platformIndexMode == Status::PlatformIndexMode::Bios)
+                                ? Status::PlatformIndexMode::Rom
+                                : Status::PlatformIndexMode::Bios;
+                            status.platformIndexMode = newMode;
+                        }
+                    }
+                    if (isPlatforms) {
+                        romm::logLine(newMode == Status::PlatformIndexMode::Bios ? "Index -> BIOS" : "Index -> ROM");
+                        viewChangedThisFrame = true;
+                    }
+                    break;
+                }
                 default:
                     break;
             }
@@ -4446,7 +4865,7 @@ exit_app:
     romFetchJobs.stop();
     remoteSearchJobs.stop();
     diagProbeJobs.stop();
-    firmwareSyncJobs.stop();
+    biosListJobs.stop();
     saveCancel.store(true);
     saveSyncJobs.stop();
     // Stop updater workers explicitly before tearing down sockets/NIFM.

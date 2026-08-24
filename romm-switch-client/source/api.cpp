@@ -282,8 +282,6 @@ bool httpRequest(const std::string& method,
     HttpRequestOptions options;
     options.timeoutSec = timeoutSec;
     options.keepAlive = true;
-    options.decodeChunked = true;
-
     HttpTransaction tx;
     if (!romm::httpRequestBuffered(method, url, extraHeaders, options, tx, err)) {
         return false;
@@ -308,8 +306,6 @@ bool httpRequestStream(const std::string& method,
     HttpRequestOptions options;
     options.timeoutSec = timeoutSec;
     options.keepAlive = false;
-    options.decodeChunked = false;
-
     ParsedHttpResponse parsed{};
     if (!romm::httpRequestStreamed(method, url, extraHeaders, options, parsed, onData, err)) {
         return false;
@@ -372,8 +368,9 @@ bool httpRequestStreamMock(const std::string& rawResponse,
     std::getline(sl, resp.statusText);
     if (!resp.statusText.empty() && resp.statusText.front() == ' ') resp.statusText.erase(resp.statusText.begin());
 
-    // Parse headers: reject chunked, track content-length for short-read detection.
+    // Parse headers: note chunked encoding, track content-length for short-read detection.
     uint64_t contentLength = 0;
+    bool chunked = false;
     std::istringstream hs(headerBlock.substr(firstCrLf + 2));
     std::string line;
     while (std::getline(hs, line)) {
@@ -386,11 +383,20 @@ bool httpRequestStreamMock(const std::string& rawResponse,
         std::string keyLower = key;
         for (auto& c : keyLower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (keyLower == "transfer-encoding" && val.find("chunked") != std::string::npos) {
-            err = "Chunked not supported in mock";
-            return false;
+            chunked = true;
         } else if (keyLower == "content-length") {
             contentLength = static_cast<uint64_t>(std::strtoull(val.c_str(), nullptr, 10));
         }
+    }
+
+    // Mirror libcurl's transparent de-chunking: deliver decoded payload to the sink.
+    if (chunked && !body.empty()) {
+        std::string decoded;
+        if (!decodeChunkedBody(body, decoded)) {
+            err = "Malformed chunked body";
+            return false;
+        }
+        body = std::move(decoded);
     }
 
     if (!body.empty()) {
@@ -450,7 +456,7 @@ static std::string buildHttpFailure(const HttpResponse& resp) {
 // Simple retry wrapper for JSON GET requests.
 // Retries on transport errors/timeouts and retryable HTTP statuses (408/425/429/5xx).
 static bool httpGetJsonWithRetry(const std::string& url,
-                                 const std::string& authBasic,
+                                 const Config& cfg,
                                  int timeoutSec,
                                  HttpResponse& resp,
                                  std::string& err)
@@ -461,9 +467,7 @@ static bool httpGetJsonWithRetry(const std::string& url,
 
     std::vector<std::pair<std::string,std::string>> headers;
     headers.emplace_back("Accept", "application/json");
-    if (!authBasic.empty()) {
-        headers.emplace_back("Authorization", "Basic " + authBasic);
-    }
+    appendAuthHeaders(cfg, headers);
 
     for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
         HttpResponse r;
@@ -555,8 +559,16 @@ static bool parsePlatforms(const std::string& body, Status& status, std::string&
             p.name = itn->second.str;
         if (auto it = o.find("slug"); it != o.end() && it->second.type == mini::Value::Type::String)
             p.slug = it->second.str;
-        if (auto it = o.find("rom_count"); it != o.end() && it->second.type == mini::Value::Type::Number)
+        if (auto it = o.find("rom_count"); it != o.end() && it->second.type == mini::Value::Type::Number) {
             p.romCount = static_cast<int>(it->second.number);
+        }
+        // BIOS availability signal for the BIOS index: prefer the computed count,
+        // fall back to the length of the firmware array on older servers.
+        if (auto it = o.find("firmware_count"); it != o.end() && it->second.type == mini::Value::Type::Number) {
+            p.firmwareCount = static_cast<int>(it->second.number);
+        } else if (auto itf = o.find("firmware"); itf != o.end() && itf->second.type == mini::Value::Type::Array) {
+            p.firmwareCount = static_cast<int>(itf->second.array.size());
+        }
 
         if (!p.id.empty()) {
             status.platforms.push_back(p);
@@ -755,8 +767,23 @@ std::string basicAuthHeader(const Config& cfg) {
     return romm::util::base64Encode(cfg.username + ":" + cfg.password);
 }
 
-static std::string buildBasicAuth(const Config& cfg) {
-    return basicAuthHeader(cfg);
+std::string bearerToken(const Config& cfg) {
+    // Mirrors save_sync.cpp SyncAuthCtx precedence: device bearer wins over
+    // Basic credentials. Basic remains as fallback (config.json / .env).
+    if (!cfg.apiToken.empty()) return cfg.apiToken;
+    return {};
+}
+
+void appendAuthHeaders(const Config& cfg,
+                       std::vector<std::pair<std::string, std::string>>& headers) {
+    if (!bearerToken(cfg).empty()) {
+        headers.emplace_back("Authorization", "Bearer " + bearerToken(cfg));
+        return;
+    }
+    const std::string basic = basicAuthHeader(cfg);
+    if (!basic.empty()) {
+        headers.emplace_back("Authorization", "Basic " + basic);
+    }
 }
 
 static std::string buildPlatformRomsQuery(const std::string& serverUrl,
@@ -785,7 +812,7 @@ bool fetchPlatformsIdentifiersDigest(const Config& cfg,
     HttpResponse resp;
     std::string err;
     if (!httpGetJsonWithRetry(cfg.serverUrl + "/api/platforms/identifiers",
-                              buildBasicAuth(cfg), cfg.httpTimeoutSeconds, resp, err)) {
+                              cfg, cfg.httpTimeoutSeconds, resp, err)) {
         setApiError(outError, outInfo, err, ErrorCategory::Network);
         return false;
     }
@@ -813,7 +840,7 @@ bool fetchRomsIdentifiersDigest(const Config& cfg,
                       "&platform_id=" + encodedPlatformId;
     HttpResponse resp;
     std::string err;
-    if (!httpGetJsonWithRetry(url, buildBasicAuth(cfg), cfg.httpTimeoutSeconds, resp, err)) {
+    if (!httpGetJsonWithRetry(url, cfg, cfg.httpTimeoutSeconds, resp, err)) {
         setApiError(outError, outInfo, err, ErrorCategory::Network);
         return false;
     }
@@ -844,7 +871,7 @@ bool fetchPlatforms(const Config& cfg, Status& status, std::string& outError, Er
     std::string err;
     std::string url = cfg.serverUrl + "/api/platforms";
 
-    if (!httpGetJsonWithRetry(url, buildBasicAuth(cfg), cfg.httpTimeoutSeconds, resp, err)) {
+    if (!httpGetJsonWithRetry(url, cfg, cfg.httpTimeoutSeconds, resp, err)) {
         setApiError(outError, outInfo, err, ErrorCategory::Network);
         return false;
     }
@@ -887,7 +914,7 @@ bool fetchGamesPageForPlatform(const Config& cfg,
     std::string err;
     std::string url = buildPlatformRomsQuery(cfg.serverUrl, platformId, limit, offset);
 
-    if (!httpGetJsonWithRetry(url, buildBasicAuth(cfg), cfg.httpTimeoutSeconds, resp, err)) {
+    if (!httpGetJsonWithRetry(url, cfg, cfg.httpTimeoutSeconds, resp, err)) {
         setApiError(outError, outInfo, err, ErrorCategory::Network);
         return false;
     }
@@ -966,7 +993,7 @@ bool searchGamesRemote(const Config& cfg,
 
     HttpResponse resp;
     std::string err;
-    if (!httpGetJsonWithRetry(url.str(), buildBasicAuth(cfg), cfg.httpTimeoutSeconds, resp, err)) {
+    if (!httpGetJsonWithRetry(url.str(), cfg, cfg.httpTimeoutSeconds, resp, err)) {
         setApiError(outError, outInfo, err, ErrorCategory::Network);
         return false;
     }
@@ -989,16 +1016,11 @@ bool enrichGameWithFiles(const Config& cfg, Game& g, std::string& outError, Erro
         return false;
     }
 
-    std::string auth;
-    if (!cfg.username.empty() || !cfg.password.empty()) {
-        auth = romm::util::base64Encode(cfg.username + ":" + cfg.password);
-    }
-
     HttpResponse resp;
     std::string err;
     std::string url = cfg.serverUrl + "/api/roms/" + g.id;
 
-    if (!httpGetJsonWithRetry(url, auth, cfg.httpTimeoutSeconds, resp, err)) {
+    if (!httpGetJsonWithRetry(url, cfg, cfg.httpTimeoutSeconds, resp, err)) {
         setApiError(outError, outInfo, err, ErrorCategory::Network);
         return false;
     }
@@ -1181,15 +1203,11 @@ bool enrichGameWithFiles(const Config& cfg, Game& g, std::string& outError, Erro
 
 bool fetchBinary(const Config& cfg, const std::string& url, std::string& outData, std::string& outError, ErrorInfo* outInfo) {
     if (outInfo) *outInfo = ErrorInfo{};
-    std::string auth;
-    if (!cfg.username.empty() || !cfg.password.empty()) {
-        auth = romm::util::base64Encode(cfg.username + ":" + cfg.password);
-    }
     HttpResponse resp;
     std::string err;
     std::vector<std::pair<std::string,std::string>> headers;
     headers.emplace_back("Accept", "*/*");
-    if (!auth.empty()) headers.emplace_back("Authorization", "Basic " + auth);
+    appendAuthHeaders(cfg, headers);
     if (!httpRequest("GET", url, headers, cfg.httpTimeoutSeconds, resp, err)) {
         setApiError(outError, outInfo, err, ErrorCategory::Network);
         return false;
@@ -1265,7 +1283,7 @@ bool fetchFirmware(const Config& cfg,
     std::string url = cfg.serverUrl + "/api/firmware?platform_id=" + encodedId;
     HttpResponse resp;
     std::string err;
-    if (!httpGetJsonWithRetry(url, buildBasicAuth(cfg), cfg.httpTimeoutSeconds, resp, err)) {
+    if (!httpGetJsonWithRetry(url, cfg, cfg.httpTimeoutSeconds, resp, err)) {
         setApiError(outError, outInfo, err, ErrorCategory::Network);
         return false;
     }

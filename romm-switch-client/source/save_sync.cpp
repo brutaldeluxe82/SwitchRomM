@@ -291,9 +291,8 @@ bool parseDeviceAuthInitResponse(const std::string& json, DeviceAuthInitResponse
     getStringField(obj, "user_code", out.userCode);
     getStringField(obj, "verification_path", out.verificationPath);
 
-    std::string complete;
-    if (getStringField(obj, "verification_path_complete", complete)) {
-        out.verificationPathComplete = !complete.empty();
+    if (getStringField(obj, "verification_path_complete", out.verificationUrlComplete)) {
+        out.verificationPathComplete = !out.verificationUrlComplete.empty();
     }
 
     getLongField(obj, "expires_in", out.expiresIn);

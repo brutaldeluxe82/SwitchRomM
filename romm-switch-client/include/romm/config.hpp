@@ -11,7 +11,8 @@ struct Config {
     int schemaVersion{1};
     // Base RomM server URL (http only)
     std::string serverUrl;
-    // Optional token (currently unused)
+    // Device bearer token (set from config/env or the paired device_token.json
+    // at startup/login); preferred over Basic credentials when non-empty.
     std::string apiToken;
     // Optional Basic auth credentials
     std::string username;
@@ -73,11 +74,18 @@ inline std::string effectiveStatesDir(const Config& c) {
 
 bool loadConfig(Config& outCfg, std::string& outError, ErrorInfo* outInfo = nullptr);
 
+// Persist the interface-editable config (server_url/username/password and the
+// other parseJson keys) to sdmc:/switch/romm_switch_client/config.json.
+// apiToken is deliberately not written (see implementation note).
+bool saveConfigJson(const Config& cfg, std::string& err);
+
 #ifdef UNIT_TEST
 // Test helper: parse .env-style content from an in-memory string.
 bool parseEnvString(const std::string& contents, Config& outCfg, std::string& outError, ErrorInfo* outInfo = nullptr);
 // Test helper: parse config.json-style content from an in-memory string.
 bool parseJsonString(const std::string& contents, Config& outCfg, std::string& outError, ErrorInfo* outInfo = nullptr);
+// Test helper: serialize cfg to config.json text (what saveConfigJson writes).
+std::string serializeConfigJson(const Config& cfg);
 #endif
 
 } // namespace romm

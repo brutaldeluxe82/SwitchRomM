@@ -16,6 +16,7 @@ SOURCES := ../source/api.cpp \
            ../source/config.cpp \
            ../source/layout.cpp \
            ../source/filesystem.cpp \
+           ../source/planner.cpp \
            ../source/firmware.cpp \
            ../source/manifest.cpp \
            ../source/http_common.cpp \
@@ -37,6 +38,7 @@ SOURCES := ../source/api.cpp \
            test_layout.cpp \
            test_thread_safety.cpp \
            test_config_env.cpp \
+           test_config_save.cpp \
            test_errors.cpp \
            test_config_sample.cpp \
            test_manifest.cpp \

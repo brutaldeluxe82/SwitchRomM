@@ -5,12 +5,12 @@ Audience: senior C++ devs working on `romm-switch-client/`. Snapshot of constrai
 ## Goals
 - Stable SDL2/libnx client for RomM: browse platforms/ROMs, queue downloads, split for FAT32/DBI, show progress, stay responsive.
 - Network is `http://` only (no TLS); intended for trusted LAN or TLS terminated upstream.
- - Controls follow standard Nintendo layout: A = confirm/select, B = back, Y = queue view/add to queue, X = start/downloads, Plus = quit.
+ - Controls follow standard Nintendo layout: A = confirm/select, B = back, Y = queue view/add to queue, X = search (index views) / start downloads (queue), Plus = settings, Minus = quit.
 
 ## Current Shape
 - UI: `source/main.cpp` owns SDL init, config/API fetch, event/render loop, view state, text renderer, blocking cover loads.
 - State: `include/romm/status.hpp` holds view enum, platform/ROM lists, queue, selections, progress atomics/strings, mutex.
-- Input: `source/input.cpp` maps standard layout (A=Select/confirm, B=Back, Y=Queue view/add, X=Start downloads, Plus=Quit).
+- Input: `source/input.cpp` maps standard layout (A=Select/confirm, B=Back, Y=Queue view/add, X=Search on index views / Start downloads in queue, Plus=Settings, Minus=Quit). Device-auth pairing serves both LOGIN (bearer token for all API calls) and DIAGNOSTICS save-sync.
 - HTTP/API: `source/api.cpp` hand-rolled HTTP (http-only, timeouts, chunked decode), JSON via `mini/json.hpp`, helpers to fetch platforms/ROMs/details and pick `.xci/.nsp`.
 - Downloader: `source/downloader.cpp` worker thread; preflight HEAD/Range; stream one GET per ROM; split into 0xFFFF0000 parts; finalize single vs multi-part; archive bit set; mutex guarding added in worker.
 - Config/logging: `.env`/JSON at `sdmc:/switch/romm_switch_client/`; leveled logging to SD + stdout/nxlink.
@@ -32,7 +32,7 @@ Audience: senior C++ devs working on `romm-switch-client/`. Snapshot of constrai
 - Cancellation: stop relies on timeouts; no socket shutdown to unblock.
 - Queue UX: no per-item state or dedupe; failed items dropped; `navStack` unused.
 - Logging: no rotation; debug can flood SD; logger not thread-safe.
-- Config: `apiToken`/`fat32Safe` unused; fast-fail on `https://` now enforced.
+- Config: `fat32Safe` unused; fast-fail on `https://` now enforced. (`apiToken` now carries the paired bearer token and is preferred over Basic on every request.)
 
 ## Plan (near-term)
 P0 - correctness/safety (DONE)

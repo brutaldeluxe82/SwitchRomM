@@ -66,6 +66,7 @@ struct DeviceAuthInitResponse {
     std::string deviceCode;
     std::string userCode;
     std::string verificationPath;
+    std::string verificationUrlComplete; // "/pair/device?user_code=…" ("" when absent)
     bool verificationPathComplete{false};
     long expiresIn{0};
     long interval{5};

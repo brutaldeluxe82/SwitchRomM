@@ -102,11 +102,30 @@ TEST_CASE("biosDestinationDir tico default: psx -> system/psx") {
     REQUIRE(romm::biosDestinationDir(cfg, "psx") == "sdmc:/tico/system/psx");
 }
 
-TEST_CASE("biosDestinationDir tico: segacd -> system/sega-cd") {
+TEST_CASE("biosDestinationDir tico: segacd -> system/genesis (Tico wiki BIOS layout)") {
     Config cfg;
     cfg.outputLayout = "tico";
     cfg.biosDir = "";
-    REQUIRE(romm::biosDestinationDir(cfg, "segacd") == "sdmc:/tico/system/sega-cd");
+    REQUIRE(romm::biosDestinationDir(cfg, "segacd") == "sdmc:/tico/system/genesis");
+}
+
+TEST_CASE("biosDestinationDir tico matches documented Tico BIOS folders") {
+    // Contract per https://ticoverse.com/wiki/library-and-roms/bios-setup
+    Config cfg;
+    cfg.outputLayout = "tico";
+    cfg.biosDir = "";
+    REQUIRE(romm::biosDestinationDir(cfg, "psx") == "sdmc:/tico/system/psx");
+    REQUIRE(romm::biosDestinationDir(cfg, "dreamcast") == "sdmc:/tico/system/dc");
+    REQUIRE(romm::biosDestinationDir(cfg, "saturn") == "sdmc:/tico/system/saturn");
+    REQUIRE(romm::biosDestinationDir(cfg, "segacd") == "sdmc:/tico/system/genesis");
+    REQUIRE(romm::biosDestinationDir(cfg, "genesis") == "sdmc:/tico/system/genesis");
+}
+
+TEST_CASE("biosDestinationDir explicit biosDir respected on tico segacd override") {
+    Config cfg;
+    cfg.outputLayout = "tico";
+    cfg.biosDir = "sdmc:/custom/bios";
+    REQUIRE(romm::biosDestinationDir(cfg, "segacd") == "sdmc:/custom/bios/genesis");
 }
 
 TEST_CASE("biosDestinationDir tico unknown slug falls back to bios root") {

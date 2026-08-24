@@ -43,7 +43,7 @@ struct Status {
     bool validCredentials{false};
 
     // Current UI/view state
-    enum class View { PLATFORMS, ROMS, DETAIL, QUEUE, ERROR, DOWNLOADING, DIAGNOSTICS, UPDATER } currentView{View::PLATFORMS};
+    enum class View { PLATFORMS, ROMS, DETAIL, QUEUE, ERROR, DOWNLOADING, DIAGNOSTICS, UPDATER, SETTINGS, LOGIN } currentView{View::PLATFORMS};
 
     // Data loaded from API
     std::vector<Platform> platforms;
@@ -57,8 +57,11 @@ struct Status {
     uint64_t romListOptionsRevision{0};
     PlatformPrefs platformPrefs;
 
-    // Selection indices for views
+    // PLATFORMS is a dual-mode index: ROM (default) and BIOS. ZR/ZL cycle modes.
+    enum class PlatformIndexMode { Rom, Bios };
+    PlatformIndexMode platformIndexMode{PlatformIndexMode::Rom};
     int selectedPlatformIndex{0};
+    int selectedBiosPlatformIndex{0}; // independent selection for the BIOS index mode
     int selectedRomIndex{0};
     int selectedQueueIndex{0};
     bool queueReorderActive{false}; // when true in QUEUE: D-pad reorders the selected item instead of moving cursor
@@ -70,6 +73,8 @@ struct Status {
     View prevQueueView{View::ROMS}; // where to return when leaving queue
     View prevDiagnosticsView{View::PLATFORMS}; // where to return when leaving diagnostics
     View prevUpdaterView{View::PLATFORMS}; // where to return when leaving updater
+    View prevSettingsView{View::PLATFORMS}; // where to return when leaving settings
+    View prevLoginView{View::PLATFORMS};    // where to return after pairing/login
 
     // Download queue and progress
     std::vector<QueueItem> downloadQueue;
@@ -116,11 +121,6 @@ struct Status {
     uint32_t diagnosticsLastProbeMs{0};
     std::string diagnosticsLastProbeDetail;
 
-    // BIOS/firmware sync state (DIAGNOSTICS view).
-    int firmwarePlatformIndex{0};
-    std::vector<Firmware> firmwareList; // last listed firmware for the selected platform
-    std::string firmwareStatusText;     // last result text ("3 downloaded, 12 skipped, 0 failed", ...)
-    std::atomic<bool> firmwareBusy{false};
 
     // Save-sync (device-auth pairing + sync job) state (DIAGNOSTICS view).
     // Non-atomic fields are guarded by Status::mutex.
@@ -133,6 +133,10 @@ struct Status {
     bool saveServerDeviceAuthKnown{false};
     bool saveServerDeviceAuthSupported{false};
     std::string saveServerVersion;  // from heartbeat probe
+
+    // Settings view (Plus): selected row in the settings menu.
+    int selectedSettingsIndex{0};
+    std::string settingsStatus; // inline feedback line (save errors, sign-out, rejections)
 
     // Updater state (GitHub latest release check + staged .nro download)
     bool updateCheckInFlight{false};
