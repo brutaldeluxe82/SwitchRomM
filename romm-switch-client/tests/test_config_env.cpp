@@ -82,6 +82,40 @@ TEST_CASE("parseEnvString normalizes booleans and log level") {
     REQUIRE(cfg.logLevel == "debug");
 }
 
+TEST_CASE("parseEnvString parses extract_archive default true, true/false forms") {
+    // Default present? cfg starts true already; setting to false must flip.
+    {
+        romm::Config cfg;
+        std::string err;
+        bool ok = romm::parseEnvString(
+            "server_url=http://ok\ndownload_dir=sdmc:/x\nextract_archive=false\n", cfg, err);
+        REQUIRE(ok);
+        REQUIRE(err.empty());
+        REQUIRE_FALSE(cfg.extractArchive);
+    }
+    // Other falsy spellings all clear it.
+    for (const char* v : {"0", "false", "no", "No", "False"}) {
+        romm::Config cfg;
+        std::string err;
+        std::string env = std::string("server_url=http://ok\ndownload_dir=sdmc:/x\nextract_archive=") + v + "\n";
+        REQUIRE(romm::parseEnvString(env, cfg, err));
+        REQUIRE_FALSE(cfg.extractArchive);
+    }
+    // Omitted keeps default true; truthy values also true.
+    {
+        romm::Config cfg;
+        std::string err;
+        REQUIRE(romm::parseEnvString("server_url=http://ok\ndownload_dir=sdmc:/x\n", cfg, err));
+        REQUIRE(cfg.extractArchive);
+    }
+    {
+        romm::Config cfg;
+        std::string err;
+        REQUIRE(romm::parseEnvString("server_url=http://ok\ndownload_dir=sdmc:/x\nextract_archive=true\n", cfg, err));
+        REQUIRE(cfg.extractArchive);
+    }
+}
+
 TEST_CASE("parseEnvString ignores comments (full-line and inline)") {
     const std::string env =
         "# full line comment\n"

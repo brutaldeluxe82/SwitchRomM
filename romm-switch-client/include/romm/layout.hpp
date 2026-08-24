@@ -32,16 +32,10 @@ std::string defaultBiosDir(OutputLayout layout);
 // Empty rommSlug or unknown folder on tico falls back to biosRoot itself.
 std::string layoutBiosFolder(const std::string& rommSlug, const std::string& biosRoot, OutputLayout layout);
 
-// True if this layout requires archives (.zip) to be extracted after download
-// for the given canonical platform slug (RomM slug). tico extracts console
-// ROMs, but arcade-style platforms ("arcade", "neogeo") run zip romsets through
-// FBNeo/mame-libretro directly (block_extract) so their archives must stay
-// packed. retroarch never extracts.
-bool layoutRequiresExtraction(OutputLayout layout, const std::string& rommSlug);
-
 // Extract a .zip archive into destDir. Returns false (with err set) on failure.
 // Entry paths are sanitized against zip-slip (".." and absolute paths are never
-// extracted outside destDir).
+// extracted outside destDir). Whether extraction happens at all is a config
+// concern (Config::extractArchive), not a layout rule.
 bool extractZipToDir(const std::string& zipPath, const std::string& destDir, std::string& err);
 
 } // namespace romm

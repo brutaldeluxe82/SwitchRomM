@@ -29,6 +29,9 @@ struct Config {
     int httpTimeoutSeconds{30};
     // FAT32-safe split flag
     bool fat32Safe{false};
+    // Extract .zip archives on download (tico layout only); arcade-class romsets
+    // (FBNeo/MAME cores) must have this false to keep archives intact.
+    bool extractArchive{true};
     // Logging verbosity (debug, info, warn, error)
     std::string logLevel{"info"};
     // Optional URL to fetch ~10MB for a quick throughput estimate; blank to skip.

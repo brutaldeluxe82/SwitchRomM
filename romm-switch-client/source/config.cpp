@@ -124,6 +124,9 @@ static bool parseEnvStream(std::istream& in, Config& outCfg) {
         else if (key == "fat32_safe") {
             std::string v = toLower(val);
             outCfg.fat32Safe = (v == "1" || v == "true" || v == "yes");
+        } else if (key == "extract_archive") {
+            std::string v = toLower(val);
+            outCfg.extractArchive = (v != "0" && v != "false" && v != "no");
         } else if (key == "log_level") outCfg.logLevel = toLower(val);
         else if (key == "speed_test_url") outCfg.speedTestUrl = val;
         else if (key == "platform_prefs_mode") outCfg.platformPrefsMode = val;
@@ -158,6 +161,7 @@ static void migrateSchema0To1(mini::Object& obj) {
     aliasKeyIfMissing(obj, "PLATFORM", "platform");
     aliasKeyIfMissing(obj, "OUTPUT_LAYOUT", "output_layout");
     aliasKeyIfMissing(obj, "DOWNLOAD_DIR", "download_dir");
+    aliasKeyIfMissing(obj, "EXTRACT_ARCHIVE", "extract_archive");
     aliasKeyIfMissing(obj, "BIOS_DIR", "bios_dir");
     aliasKeyIfMissing(obj, "HTTP_TIMEOUT_SECONDS", "http_timeout_seconds");
     aliasKeyIfMissing(obj, "FAT32_SAFE", "fat32_safe");
@@ -175,6 +179,7 @@ static void migrateSchema0To1(mini::Object& obj) {
     aliasKeyIfMissing(obj, "httpTimeoutSeconds", "http_timeout_seconds");
     aliasKeyIfMissing(obj, "fat32Safe", "fat32_safe");
     aliasKeyIfMissing(obj, "logLevel", "log_level");
+    aliasKeyIfMissing(obj, "extractArchive", "extract_archive");
     aliasKeyIfMissing(obj, "speedTestUrl", "speed_test_url");
     aliasKeyIfMissing(obj, "platformPrefsMode", "platform_prefs_mode");
     aliasKeyIfMissing(obj, "platformPrefsSd", "platform_prefs_sd");
@@ -260,6 +265,7 @@ static bool parseJsonObject(mini::Object& obj, Config& outCfg, std::string& outE
     getStr("bios_dir", outCfg.biosDir);
     getInt("http_timeout_seconds", outCfg.httpTimeoutSeconds);
     getBool("fat32_safe", outCfg.fat32Safe);
+    getBool("extract_archive", outCfg.extractArchive);
     {
         std::string lvl;
         getStr("log_level", lvl);

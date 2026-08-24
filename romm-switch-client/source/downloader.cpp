@@ -979,10 +979,11 @@ static bool downloadOneFile(Game g, const DownloadFileSpec* spec, Status& status
         setDownloadFailureState(status, true, "Finalize failed");
         return false;
     }
-    // tico extracts .zip downloads into the game folder (parent of the zip) and
-    // removes the archive afterwards — except arcade-class platforms whose zip
-    // romsets the FBNeo core loads directly.
-    if (layoutRequiresExtraction(parseOutputLayout(cfg.outputLayout), platformSlug)) {
+    // Optionally unpack .zip downloads into the game folder and drop the
+    // archive afterwards. Driven purely by config: Arcade FBNeo/MAME ROMs are
+    // zip romsets the core loads directly, so their config has
+    // extract_archive = false.
+    if (cfg.extractArchive && parseOutputLayout(cfg.outputLayout) == OutputLayout::Tico) {
         std::string ext = finalPath.extension().string();
         for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (ext == ".zip") {

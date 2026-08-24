@@ -29,6 +29,46 @@ TEST_CASE("JSON output_layout=retroarch parses") {
     REQUIRE(cfg.outputLayout == "retroarch");
 }
 
+TEST_CASE("JSON extract_archive parses and aliasing maps KEY variants") {
+    // Default absent -> stays true.
+    {
+        romm::Config cfg;
+        std::string err;
+        REQUIRE(romm::parseJsonString(
+            "{\"schema_version\":1,\"server_url\":\"http://x\",\"download_dir\":\"\"}",
+            cfg, err));
+        REQUIRE(cfg.extractArchive);
+    }
+    // Canonical snake_case false clears it.
+    {
+        romm::Config cfg;
+        std::string err;
+        REQUIRE(romm::parseJsonString(
+            "{\"schema_version\":1,\"server_url\":\"http://x\",\"download_dir\":\"\",\"extract_archive\":false}",
+            cfg, err));
+        REQUIRE_FALSE(cfg.extractArchive);
+    }
+    // ENV-style uppercase alias maps via the legacy (schema_version 0) migration path.
+    {
+        romm::Config cfg;
+        std::string err;
+        // No schema_version -> v0 migration -> uppercase alias applied then canon getBool.
+        REQUIRE(romm::parseJsonString(
+            "{\"server_url\":\"http://x\",\"download_dir\":\"\",\"EXTRACT_ARCHIVE\":false}",
+            cfg, err));
+        REQUIRE_FALSE(cfg.extractArchive);
+    }
+    // camelCase alias also fires only in migration; schema_version 1 stays strict snake_case.
+    {
+        romm::Config cfg;
+        std::string err;
+        REQUIRE(romm::parseJsonString(
+            "{\"server_url\":\"http://x\",\"download_dir\":\"\",\"extractArchive\":false}",
+            cfg, err));
+        REQUIRE_FALSE(cfg.extractArchive);
+    }
+}
+
 TEST_CASE("empty download_dir + retroarch -> layout default download dir") {
     romm::Config cfg;
     cfg.serverUrl = "http://example.com";

@@ -15,7 +15,7 @@
   | BIOS root | `sdmc:/tico/system/<platform>/` | `sdmc:/retroarch/system` (flat) |
   | Battery saves | `sdmc:/tico/saves` | `sdmc:/retroarch/.retroarch/saves` |
   | Save states | `sdmc:/tico/states` | `sdmc:/retroarch/.retroarch/states` |
-  | Zip extraction on download | yes, console ROMs only (arcade/mame/fbneo/fba romsets stay zipped) | no |
+  | Zip extraction on download | when `EXTRACT_ARCHIVE=true` (default) | no |
 
 - `DOWNLOAD_DIR` (empty): Override the ROMs root from the table above. Empty = derive
   from `OUTPUT_LAYOUT`. Platform subfolders are created automatically; temps under
@@ -24,6 +24,7 @@
   from `OUTPUT_LAYOUT`.
 - `HTTP_TIMEOUT_SECONDS` (`30`): HTTP send/recv timeout.
 - `FAT32_SAFE` (`true`): If true, split into FAT32/DBI-sized parts (`0xFFFF0000`). If false, keep as a single file (no splitting). Multi-part handling still uses DBI archive bit when enabled.
+- `EXTRACT_ARCHIVE` (`true`): If true, unpack `.zip` ROM downloads after fetch and delete the archive (tico layout only; ignored for retroarch). Keep `true` for consoles whose cores take loose ROMs. Set `false` wherever an arcade-class core (FBNeo/MAME) loads the zip romset directly, so the archive must stay packed — this is the `block_extract` contract from `ticohq/tico-fbneo`.
 - `LOG_LEVEL` (`info`): `debug|info|warn|error`.
 - `SPEED_TEST_URL` (blank): Optional URL to fetch ~40MB (Range) for a quick throughput estimate. If set, runs once at startup; if blank, only in-download speeds are shown.
 
