@@ -15,6 +15,7 @@
   | BIOS root | `sdmc:/tico/system/<platform>/` | `sdmc:/retroarch/system` (flat) |
   | Battery saves | `sdmc:/tico/saves` | `sdmc:/retroarch/.retroarch/saves` |
   | Save states | `sdmc:/tico/states` | `sdmc:/retroarch/.retroarch/states` |
+  | Zip extraction on download | yes, console ROMs only (arcade/mame/fbneo/fba romsets stay zipped) | no |
 
 - `DOWNLOAD_DIR` (empty): Override the ROMs root from the table above. Empty = derive
   from `OUTPUT_LAYOUT`. Platform subfolders are created automatically; temps under
