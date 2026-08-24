@@ -214,9 +214,13 @@ std::string layoutBiosFolder(const std::string& rommSlug, const std::string& bio
     if (biosRoot.empty()) return biosRoot;
     return biosRoot + "/" + folder;
 }
-
-bool layoutRequiresExtraction(OutputLayout layout) {
-    return layout == OutputLayout::Tico;
+bool layoutRequiresExtraction(OutputLayout layout, const std::string& rommSlug) {
+    if (layout == OutputLayout::RetroArch) return false;
+    // Zip-based arcade romsets stay packed: tico's FBNeo build is libretro
+    // block_extract and hands the archive to the core intact
+    // (valid_extensions "zip|7z", ticohq/tico-fbneo src/burner/libretro).
+    std::string slug = toLower(rommSlug);
+    return slug != "arcade" && slug != "mame" && slug != "fba" && slug != "fbneo";
 }
 
 bool extractZipToDir(const std::string& zipPath, const std::string& destDir, std::string& err) {

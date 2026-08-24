@@ -127,9 +127,21 @@ TEST_CASE("layoutBiosFolder tico nested, retroarch flat, empty fallback") {
     REQUIRE(romm::layoutBiosFolder("unknownslug", "sdmc:/tico/system", romm::OutputLayout::Tico) == "sdmc:/tico/system");
 }
 
-TEST_CASE("layoutRequiresExtraction tico true retroarch false") {
-    REQUIRE(romm::layoutRequiresExtraction(romm::OutputLayout::Tico));
-    REQUIRE_FALSE(romm::layoutRequiresExtraction(romm::OutputLayout::RetroArch));
+TEST_CASE("layoutRequiresExtraction per layout and arcade-class slugs") {
+    using romm::OutputLayout;
+    // tico extracts console ROMs regardless of slug.
+    REQUIRE(romm::layoutRequiresExtraction(OutputLayout::Tico, "snes"));
+    REQUIRE(romm::layoutRequiresExtraction(OutputLayout::Tico, "nes"));
+    REQUIRE(romm::layoutRequiresExtraction(OutputLayout::Tico, "psx"));
+    // Arcade-class slugs keep zip romsets packed for FBNeo/mame cores.
+    REQUIRE_FALSE(romm::layoutRequiresExtraction(OutputLayout::Tico, "arcade"));
+    REQUIRE_FALSE(romm::layoutRequiresExtraction(OutputLayout::Tico, "mame"));
+    REQUIRE_FALSE(romm::layoutRequiresExtraction(OutputLayout::Tico, "fbneo"));
+    REQUIRE_FALSE(romm::layoutRequiresExtraction(OutputLayout::Tico, "fba"));
+    REQUIRE_FALSE(romm::layoutRequiresExtraction(OutputLayout::Tico, "Arcade"));
+    // retroarch never extracts.
+    REQUIRE_FALSE(romm::layoutRequiresExtraction(OutputLayout::RetroArch, "snes"));
+    REQUIRE_FALSE(romm::layoutRequiresExtraction(OutputLayout::RetroArch, "arcade"));
 }
 
 TEST_CASE("extractZipToDir extracts files and nested dirs byte-equal") {

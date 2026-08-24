@@ -979,9 +979,10 @@ static bool downloadOneFile(Game g, const DownloadFileSpec* spec, Status& status
         setDownloadFailureState(status, true, "Finalize failed");
         return false;
     }
-    // Layouts that require extraction (tico): expand .zip downloads into the game
-    // folder (parent of the zip) and remove the archive afterwards.
-    if (layoutRequiresExtraction(parseOutputLayout(cfg.outputLayout))) {
+    // tico extracts .zip downloads into the game folder (parent of the zip) and
+    // removes the archive afterwards — except arcade-class platforms whose zip
+    // romsets the FBNeo core loads directly.
+    if (layoutRequiresExtraction(parseOutputLayout(cfg.outputLayout), platformSlug)) {
         std::string ext = finalPath.extension().string();
         for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (ext == ".zip") {
