@@ -34,6 +34,19 @@ bool fetchGamesPageForPlatform(const Config& cfg,
                                GamesPage& outPage,
                                std::string& outError,
                                ErrorInfo* outInfo = nullptr);
+// Auth-explicit variant of fetchGamesPageForPlatform for background workers:
+// takes plain strings instead of a Config so callers never dereference a
+// Config captured on the UI thread. Authorization precedence matches
+// appendAuthHeaders: bearer wins over Basic, else anonymous.
+bool fetchPlatformRomsPageAuthed(const std::string& serverUrl,
+                                 const std::string& bearerTokenOrEmpty,
+                                 const std::string& basicAuthBase64OrEmpty,
+                                 int timeoutSeconds,
+                                 const std::string& platformId,
+                                 size_t offset,
+                                 size_t limit,
+                                 GamesPage& outPage,
+                                 std::string& outError);
 bool fetchRomsIdentifiersDigest(const Config& cfg,
                                 const std::string& platformId,
                                 std::string& outDigest,

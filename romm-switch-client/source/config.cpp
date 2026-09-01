@@ -92,6 +92,14 @@ static void stripInlineComment(std::string& val) {
     }
 }
 
+// Normalize Grout-parity settings after any parse path: negative backup limits
+// disable retention; download timeout clamps to [15,120] minutes.
+static void clampGroutSettings(Config& cfg) {
+    if (cfg.saveBackupLimit < 0) cfg.saveBackupLimit = 0;
+    if (cfg.downloadTimeoutMinutes < 15) cfg.downloadTimeoutMinutes = 15;
+    else if (cfg.downloadTimeoutMinutes > 120) cfg.downloadTimeoutMinutes = 120;
+}
+
 static bool parseEnvStream(std::istream& in, Config& outCfg) {
     std::string line;
     while (std::getline(in, line)) {
@@ -127,12 +135,20 @@ static bool parseEnvStream(std::istream& in, Config& outCfg) {
         } else if (key == "extract_archive") {
             std::string v = toLower(val);
             outCfg.extractArchive = (v != "0" && v != "false" && v != "no");
+        } else if (key == "hide_unsupported_platforms") {
+            std::string v = toLower(val);
+            outCfg.hideUnsupportedPlatforms = (v != "0" && v != "false" && v != "no");
         } else if (key == "log_level") outCfg.logLevel = toLower(val);
+        else if (key == "save_sync_behavior") outCfg.saveSyncBehavior = toLower(val);
+        else if (key == "save_backup_limit") outCfg.saveBackupLimit = std::atoi(val.c_str());
+        else if (key == "download_timeout_minutes") outCfg.downloadTimeoutMinutes = std::atoi(val.c_str());
+        else if (key == "device_name") outCfg.deviceName = val;
         else if (key == "speed_test_url") outCfg.speedTestUrl = val;
         else if (key == "platform_prefs_mode") outCfg.platformPrefsMode = val;
         else if (key == "platform_prefs_sd") outCfg.platformPrefsPathSd = val;
         else if (key == "platform_prefs_romfs") outCfg.platformPrefsPathRomfs = val;
     }
+    clampGroutSettings(outCfg);
     return true;
 }
 
@@ -166,7 +182,11 @@ static void migrateSchema0To1(mini::Object& obj) {
     aliasKeyIfMissing(obj, "HTTP_TIMEOUT_SECONDS", "http_timeout_seconds");
     aliasKeyIfMissing(obj, "FAT32_SAFE", "fat32_safe");
     aliasKeyIfMissing(obj, "LOG_LEVEL", "log_level");
+    aliasKeyIfMissing(obj, "SAVE_SYNC_BEHAVIOR", "save_sync_behavior");
     aliasKeyIfMissing(obj, "SPEED_TEST_URL", "speed_test_url");
+    aliasKeyIfMissing(obj, "SAVE_BACKUP_LIMIT", "save_backup_limit");
+    aliasKeyIfMissing(obj, "DOWNLOAD_TIMEOUT_MINUTES", "download_timeout_minutes");
+    aliasKeyIfMissing(obj, "DEVICE_NAME", "device_name");
     aliasKeyIfMissing(obj, "PLATFORM_PREFS_MODE", "platform_prefs_mode");
     aliasKeyIfMissing(obj, "PLATFORM_PREFS_SD", "platform_prefs_sd");
     aliasKeyIfMissing(obj, "PLATFORM_PREFS_ROMFS", "platform_prefs_romfs");
@@ -266,15 +286,21 @@ static bool parseJsonObject(mini::Object& obj, Config& outCfg, std::string& outE
     getInt("http_timeout_seconds", outCfg.httpTimeoutSeconds);
     getBool("fat32_safe", outCfg.fat32Safe);
     getBool("extract_archive", outCfg.extractArchive);
+    getBool("hide_unsupported_platforms", outCfg.hideUnsupportedPlatforms);
     {
         std::string lvl;
         getStr("log_level", lvl);
         if (!lvl.empty()) outCfg.logLevel = toLower(lvl);
     }
+    getStr("save_sync_behavior", outCfg.saveSyncBehavior);
+    getInt("save_backup_limit", outCfg.saveBackupLimit);
+    getInt("download_timeout_minutes", outCfg.downloadTimeoutMinutes);
+    getStr("device_name", outCfg.deviceName);
     getStr("speed_test_url", outCfg.speedTestUrl);
     getStr("platform_prefs_mode", outCfg.platformPrefsMode);
     getStr("platform_prefs_sd", outCfg.platformPrefsPathSd);
     getStr("platform_prefs_romfs", outCfg.platformPrefsPathRomfs);
+    clampGroutSettings(outCfg);
     return true;
 }
 
@@ -331,9 +357,13 @@ std::string serializeConfigJson(const Config& cfg) {
     strVal(os, "download_dir", cfg.downloadDir, true);
     strVal(os, "bios_dir", cfg.biosDir, true);
     intVal(os, "http_timeout_seconds", cfg.httpTimeoutSeconds, true);
-    boolVal(os, "fat32_safe", cfg.fat32Safe, true);
     boolVal(os, "extract_archive", cfg.extractArchive, true);
+    boolVal(os, "hide_unsupported_platforms", cfg.hideUnsupportedPlatforms, true);
     strVal(os, "log_level", cfg.logLevel, true);
+    strVal(os, "save_sync_behavior", cfg.saveSyncBehavior, true);
+    intVal(os, "save_backup_limit", cfg.saveBackupLimit, true);
+    intVal(os, "download_timeout_minutes", cfg.downloadTimeoutMinutes, true);
+    strVal(os, "device_name", cfg.deviceName, true);
     strVal(os, "speed_test_url", cfg.speedTestUrl, true);
     strVal(os, "platform_prefs_mode", cfg.platformPrefsMode, true);
     strVal(os, "platform_prefs_sd", cfg.platformPrefsPathSd, true);

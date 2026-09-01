@@ -21,10 +21,8 @@ include $(DEVKITPRO)/libnx/switch_rules
 #---------------------------------------------------------------------------------
 TARGET      := romm-switch-client
 BUILD       := build
-SOURCES     := source
-DATA        := data
-INCLUDES    := include
-ROMFS       := romfs
+SOURCES     := source source/ui third_party/qrcodegen
+INCLUDES    := include Plutonium/Plutonium/include third_party/qrcodegen
 
 APP_TITLE   := RomM Switch Client
 APP_AUTHOR  := Shalasere
@@ -53,11 +51,10 @@ ASFLAGS     := -g $(ARCH)
 
 LDFLAGS     := -specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-LIBS        := -lSDL2 -lEGL -lglapi -ldrm_nouveau -lnx $(CURL_LIBS) -lminizip -lz
-
-LIBDIRS     := $(PORTLIBS) $(LIBNX)
-
-#---------------------------------------------------------------------------------
+LIBS        := -lpu -lSDL2_image -lSDL2_gfx -lSDL2_ttf -lSDL2_mixer -lmodplug -lmpg123 -lvorbisidec -logg \
+               -lfreetype -lharfbuzz -lSDL2 -lEGL -lglapi -ldrm_nouveau -lwebp -lpng -ljpeg -lz -lbz2 \
+               -lnx $(CURL_LIBS) -lminizip
+LIBDIRS     := $(PORTLIBS) $(LIBNX) $(CURDIR)/Plutonium
 # No need to edit below unless adding extra file extensions/rules
 # (inherited from libnx template)
 #---------------------------------------------------------------------------------

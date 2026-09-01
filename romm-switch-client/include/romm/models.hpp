@@ -37,6 +37,7 @@ struct Game {
     std::string fsName;
     std::string fileId; // preferred RomM file id (xci/nsp)
     std::string coverUrl;
+    std::string description; // RomM summary (Grout shows it on game details)
     uint64_t sizeBytes{0};
     std::string downloadUrl;
     std::vector<RomFile> files; // full file list from API detail

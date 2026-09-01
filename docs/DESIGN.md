@@ -10,7 +10,7 @@ Audience: senior C++ devs working on `romm-switch-client/`. Snapshot of constrai
 ## Current Shape
 - UI: `source/main.cpp` owns SDL init, config/API fetch, event/render loop, view state, text renderer, blocking cover loads.
 - State: `include/romm/status.hpp` holds view enum, platform/ROM lists, queue, selections, progress atomics/strings, mutex.
-- Input: `source/input.cpp` maps standard layout (A=Select/confirm, B=Back, Y=Queue view/add, X=Search on index views / Start downloads in queue, Plus=Settings, Minus=Quit). Device-auth pairing serves both LOGIN (bearer token for all API calls) and DIAGNOSTICS save-sync.
+- Input: `source/input.cpp` maps standard layout (A=Select/confirm, B=Back, Y=Queue view/add, X=Search on index views / Start downloads in queue, Plus=Settings, Minus=Quit). Device-auth pairing serves LOGIN (bearer token for all API calls) and save-sync (PLATFORMS SYNC index + SYNCROMS view; ZR/ZL cycles ROM/BIOS/SYNC).
 - HTTP/API: `source/api.cpp` hand-rolled HTTP (http-only, timeouts, chunked decode), JSON via `mini/json.hpp`, helpers to fetch platforms/ROMs/details and pick `.xci/.nsp`.
 - Downloader: `source/downloader.cpp` worker thread; preflight HEAD/Range; stream one GET per ROM; split into 0xFFFF0000 parts; finalize single vs multi-part; archive bit set; mutex guarding added in worker.
 - Config/logging: `.env`/JSON at `sdmc:/switch/romm_switch_client/`; leveled logging to SD + stdout/nxlink.

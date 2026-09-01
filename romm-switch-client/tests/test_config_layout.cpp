@@ -113,3 +113,83 @@ TEST_CASE("effectiveStatesDir per layout") {
     cfg.outputLayout = "retroarch";
     REQUIRE(romm::effectiveStatesDir(cfg) == "sdmc:/retroarch/.retroarch/states");
 }
+
+TEST_CASE("grout settings parse from env, JSON, and legacy aliases") {
+    // Env keys parse (uppercase and lowercase both lowercased before match).
+    {
+        romm::Config cfg;
+        std::string err;
+        REQUIRE(romm::parseEnvString(
+            "server_url=http://x\nSAVE_BACKUP_LIMIT=10\ndevice_name=Deck\n", cfg, err));
+        REQUIRE(cfg.saveBackupLimit == 10);
+        REQUIRE(cfg.deviceName == "Deck");
+    }
+    // Canonical snake_case at schema_version 1.
+    {
+        romm::Config cfg;
+        std::string err;
+        REQUIRE(romm::parseJsonString(
+            "{\"schema_version\":1,\"server_url\":\"http://x\",\"save_backup_limit\":5,\"device_name\":\"Handheld\"}",
+            cfg, err));
+        REQUIRE(cfg.saveBackupLimit == 5);
+        REQUIRE(cfg.deviceName == "Handheld");
+    }
+    // Uppercase env-style keys map via the schema_version 0 migration path.
+    {
+        romm::Config cfg;
+        std::string err;
+        REQUIRE(romm::parseJsonString(
+            "{\"server_url\":\"http://x\",\"SAVE_BACKUP_LIMIT\":15,\"DOWNLOAD_TIMEOUT_MINUTES\":30,\"DEVICE_NAME\":\"Dock\"}",
+            cfg, err));
+        REQUIRE(cfg.saveBackupLimit == 15);
+        REQUIRE(cfg.downloadTimeoutMinutes == 30);
+        REQUIRE(cfg.deviceName == "Dock");
+    }
+}
+
+TEST_CASE("save_sync_behavior default is ask") {
+    romm::Config cfg;
+    std::string err;
+    REQUIRE(romm::parseEnvString("server_url=http://x\n", cfg, err));
+    REQUIRE(cfg.saveSyncBehavior == "ask");
+}
+
+TEST_CASE("save_sync_behavior parses from env (case-normalized)") {
+    romm::Config cfg;
+    std::string err;
+    REQUIRE(romm::parseEnvString(
+        "server_url=http://x\nSAVE_SYNC_BEHAVIOR=Newest\n", cfg, err));
+    REQUIRE(cfg.saveSyncBehavior == "newest");
+}
+
+TEST_CASE("save_sync_behavior parses from JSON and legacy uppercase alias") {
+    // Canonical snake_case at schema_version 1.
+    {
+        romm::Config cfg;
+        std::string err;
+        REQUIRE(romm::parseJsonString(
+            "{\"schema_version\":1,\"server_url\":\"http://x\",\"download_dir\":\"\",\"save_sync_behavior\":\"server\"}",
+            cfg, err));
+        REQUIRE(cfg.saveSyncBehavior == "server");
+    }
+    // Uppercase env-style key maps via the schema_version 0 migration path.
+    {
+        romm::Config cfg;
+        std::string err;
+        REQUIRE(romm::parseJsonString(
+            "{\"server_url\":\"http://x\",\"download_dir\":\"\",\"SAVE_SYNC_BEHAVIOR\":\"client\"}",
+            cfg, err));
+        REQUIRE(cfg.saveSyncBehavior == "client");
+    }
+}
+
+TEST_CASE("serializeConfigJson emits save_sync_behavior") {
+    romm::Config cfg;
+    cfg.saveSyncBehavior = "newest";
+    const std::string json = romm::serializeConfigJson(cfg);
+    REQUIRE(json.find("\"save_sync_behavior\":\"newest\"") != std::string::npos);
+    // Default round-trip keeps the key present.
+    romm::Config def;
+    REQUIRE(romm::serializeConfigJson(def).find("\"save_sync_behavior\":\"ask\"") !=
+            std::string::npos);
+}

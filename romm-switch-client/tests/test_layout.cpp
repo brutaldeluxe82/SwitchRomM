@@ -95,7 +95,7 @@ TEST_CASE("layoutPlatformFolder maps tico spot checks") {
     REQUIRE(romm::layoutPlatformFolder("genesis", romm::OutputLayout::Tico) == "genesis");
     REQUIRE(romm::layoutPlatformFolder("sms", romm::OutputLayout::Tico) == "master-system");
     REQUIRE(romm::layoutPlatformFolder("segacd", romm::OutputLayout::Tico) == "sega-cd");
-    REQUIRE(romm::layoutPlatformFolder("dc", romm::OutputLayout::Tico) == "dc");
+    REQUIRE(romm::layoutPlatformFolder("dreamcast", romm::OutputLayout::Tico) == "dc");
     // Alias first normalized, then mapped.
     REQUIRE(romm::layoutPlatformFolder("famicom", romm::OutputLayout::Tico) == "nes");
     REQUIRE(romm::layoutPlatformFolder("megadrive", romm::OutputLayout::Tico) == "genesis");
@@ -103,6 +103,69 @@ TEST_CASE("layoutPlatformFolder maps tico spot checks") {
     // Unknown slug has no tico folder.
     REQUIRE(romm::layoutPlatformFolder("unknownslug", romm::OutputLayout::Tico).empty());
     REQUIRE(romm::layoutPlatformFolder("", romm::OutputLayout::Tico).empty());
+    // Stock tico on-device roms folders (user-verified, all lowercase):
+    // 3ds, atomiswave, dc, fbneo, game-gear, gb, gba, gbc, gc, genesis,
+    // master-system, n64, naomi, nes, psp, psx, saturn, sega-cd, snes, wii.
+    REQUIRE(romm::layoutPlatformFolder("3ds", romm::OutputLayout::Tico) == "3ds");
+    REQUIRE(romm::layoutPlatformFolder("atomiswave", romm::OutputLayout::Tico) == "atomiswave");
+    REQUIRE(romm::layoutPlatformFolder("naomi", romm::OutputLayout::Tico) == "naomi");
+    REQUIRE(romm::layoutPlatformFolder("nds", romm::OutputLayout::Tico) == "nds");
+    // RomM's canonical arcade slug maps to tico's fbneo folder; fbneo itself
+    // is accepted as a direct entry.
+    REQUIRE(romm::layoutPlatformFolder("arcade", romm::OutputLayout::Tico) == "fbneo");
+    REQUIRE(romm::layoutPlatformFolder("fbneo", romm::OutputLayout::Tico) == "fbneo");
+    REQUIRE(romm::layoutPlatformFolder("gb", romm::OutputLayout::Tico) == "gb");
+    REQUIRE(romm::layoutPlatformFolder("gbc", romm::OutputLayout::Tico) == "gbc");
+    REQUIRE(romm::layoutPlatformFolder("gba", romm::OutputLayout::Tico) == "gba");
+    REQUIRE(romm::layoutPlatformFolder("ngc", romm::OutputLayout::Tico) == "gc");
+    REQUIRE(romm::layoutPlatformFolder("gamecube", romm::OutputLayout::Tico) == "gc");
+    REQUIRE(romm::layoutPlatformFolder("n64", romm::OutputLayout::Tico) == "n64");
+    REQUIRE(romm::layoutPlatformFolder("nes", romm::OutputLayout::Tico) == "nes");
+    REQUIRE(romm::layoutPlatformFolder("psp", romm::OutputLayout::Tico) == "psp");
+    REQUIRE(romm::layoutPlatformFolder("psx", romm::OutputLayout::Tico) == "psx");
+    REQUIRE(romm::layoutPlatformFolder("saturn", romm::OutputLayout::Tico) == "saturn");
+    REQUIRE(romm::layoutPlatformFolder("snes", romm::OutputLayout::Tico) == "snes");
+    REQUIRE(romm::layoutPlatformFolder("wii", romm::OutputLayout::Tico) == "wii");
+}
+
+TEST_CASE("platformSupportedByTico matches tico list (wiki + UI extras)") {
+    // Official wiki "Supported ROM Formats" consoles (canonical slugs).
+    REQUIRE(romm::platformSupportedByTico("nes"));
+    REQUIRE(romm::platformSupportedByTico("fds")); // FDS ROMs live in nes/
+    REQUIRE(romm::platformSupportedByTico("snes"));
+    REQUIRE(romm::platformSupportedByTico("gb"));
+    REQUIRE(romm::platformSupportedByTico("gbc"));
+    REQUIRE(romm::platformSupportedByTico("gba"));
+    REQUIRE(romm::platformSupportedByTico("sms"));
+    REQUIRE(romm::platformSupportedByTico("gamegear"));
+    REQUIRE(romm::platformSupportedByTico("genesis"));
+    REQUIRE(romm::platformSupportedByTico("segacd"));
+    REQUIRE(romm::platformSupportedByTico("saturn"));
+    REQUIRE(romm::platformSupportedByTico("dreamcast"));
+    REQUIRE(romm::platformSupportedByTico("psx"));
+    REQUIRE(romm::platformSupportedByTico("psp"));
+    REQUIRE(romm::platformSupportedByTico("gc"));
+    REQUIRE(romm::platformSupportedByTico("wii"));
+    // Shown in the tico UI but missing from the (out-of-date) wiki page.
+    REQUIRE(romm::platformSupportedByTico("atomiswave"));
+    REQUIRE(romm::platformSupportedByTico("naomi"));
+    REQUIRE(romm::platformSupportedByTico("arcade")); // fbneo
+    REQUIRE(romm::platformSupportedByTico("fbneo"));  // direct tico folder name
+    REQUIRE(romm::platformSupportedByTico("3ds"));
+    REQUIRE(romm::platformSupportedByTico("n64"));
+    REQUIRE(romm::platformSupportedByTico("nds")); // tico-melonds fork in ticohq org
+    // Aliases normalize into supported slugs.
+    REQUIRE(romm::platformSupportedByTico("megadrive"));
+    REQUIRE(romm::platformSupportedByTico("mastersystem"));
+    REQUIRE(romm::platformSupportedByTico("famicom"));
+    REQUIRE(romm::platformSupportedByTico("ps1"));
+    REQUIRE(romm::platformSupportedByTico("SegaCD")); // case-insensitive
+    // Have tico folders but not listed as supported.
+    REQUIRE_FALSE(romm::platformSupportedByTico("ps2"));
+    REQUIRE_FALSE(romm::platformSupportedByTico("atari2600"));
+    // Unknown/empty never supported.
+    REQUIRE_FALSE(romm::platformSupportedByTico("unknownslug"));
+    REQUIRE_FALSE(romm::platformSupportedByTico(""));
 }
 
 TEST_CASE("layoutPlatformFolder retroarch returns normalized slug") {

@@ -712,6 +712,13 @@ static bool parseGamesPayload(const std::string& body,
                 g.coverUrl = absolutizeUrl(cov->second.str);
         }
 
+        // Summary/description when the list payload includes it (detail view
+        // falls back to the enrich call otherwise).
+        if (auto it = o.find("summary"); it != o.end() && it->second.type == mini::Value::Type::String)
+            g.description = it->second.str;
+        else if (auto it1 = o.find("description"); it1 != o.end() && it1->second.type == mini::Value::Type::String)
+            g.description = it1->second.str;
+
         // If the list API doesn't include per-ROM platform metadata, fall back to the selected platform.
         if (g.platformId.empty()) g.platformId = platformId;
 
@@ -946,6 +953,83 @@ bool fetchGamesPageForPlatform(const Config& cfg,
     return true;
 }
 
+bool fetchPlatformRomsPageAuthed(const std::string& serverUrl,
+                                 const std::string& bearerTokenOrEmpty,
+                                 const std::string& basicAuthBase64OrEmpty,
+                                 int timeoutSeconds,
+                                 const std::string& platformId,
+                                 size_t offset,
+                                 size_t limit,
+                                 GamesPage& outPage,
+                                 std::string& outError) {
+    outPage = GamesPage{};
+    if (platformId.empty()) {
+        outError = "Missing platform id.";
+        return false;
+    }
+    if (limit == 0) limit = kDefaultApiPageLimit;
+
+    std::vector<std::pair<std::string, std::string>> headers;
+    headers.emplace_back("Accept", "application/json");
+    if (!bearerTokenOrEmpty.empty()) {
+        headers.emplace_back("Authorization", "Bearer " + bearerTokenOrEmpty);
+    } else if (!basicAuthBase64OrEmpty.empty()) {
+        headers.emplace_back("Authorization", "Basic " + basicAuthBase64OrEmpty);
+    }
+
+    // Same bounded retry/backoff as httpGetJsonWithRetry.
+    const int maxAttempts = 3;
+    std::string lastErr;
+    bool hadHttpResponse = false;
+    HttpResponse resp;
+    const std::string url = buildPlatformRomsQuery(serverUrl, platformId, limit, offset);
+    for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
+        HttpResponse r;
+        std::string e;
+        if (httpRequest("GET", url, headers, timeoutSeconds, r, e)) {
+            hadHttpResponse = true;
+            resp = std::move(r);
+            if (resp.statusCode >= 200 && resp.statusCode < 300) {
+                break;
+            }
+            lastErr = buildHttpFailure(resp);
+            if (shouldRetryHttpStatus(resp.statusCode) && attempt < maxAttempts) {
+                svcSleepThread((attempt == 1) ? kRetryDelayFastNs : kRetryDelaySlowNs);
+                continue;
+            }
+            outError = lastErr;
+            return false;
+        }
+        lastErr = e.empty() ? "HTTP transport failure" : e;
+        if (attempt < maxAttempts) {
+            svcSleepThread((attempt == 1) ? kRetryDelayFastNs : kRetryDelaySlowNs);
+        }
+    }
+    if (!hadHttpResponse ||
+        !(resp.statusCode >= 200 && resp.statusCode < 300)) {
+        outError = hadHttpResponse ? lastErr
+                                   : "HTTP request failed after retries: " + lastErr;
+        return false;
+    }
+
+    ParsedGamesPayload parsed;
+    if (!parseGamesPayload(resp.body, platformId, serverUrl, parsed, outError)) {
+        return false;
+    }
+    outPage.games = std::move(parsed.games);
+    outPage.offset = offset;
+    outPage.limit = limit;
+    outPage.total = parsed.total;
+    outPage.totalKnown = parsed.totalKnown;
+    if (parsed.totalKnown) {
+        outPage.hasMore = (offset + outPage.games.size()) < parsed.total;
+    } else {
+        outPage.hasMore = outPage.games.size() >= limit;
+    }
+    return true;
+}
+
+
 bool fetchGamesForPlatform(const Config& cfg,
                            const std::string& platformId,
                            Status& status,
@@ -1067,6 +1151,13 @@ bool enrichGameWithFiles(const Config& cfg, Game& g, std::string& outError, Erro
         auto cov = it2->second.object.find("cover");
         if (cov != it2->second.object.end() && cov->second.type == mini::Value::Type::String)
             g.coverUrl = absolutizeUrl(cov->second.str);
+    }
+
+    // Grout's game details shows the RomM summary; parse both common keys.
+    if (auto d = obj.find("summary"); d != obj.end() && d->second.type == mini::Value::Type::String) {
+        g.description = d->second.str;
+    } else if (auto d2 = obj.find("description"); d2 != obj.end() && d2->second.type == mini::Value::Type::String) {
+        g.description = d2->second.str;
     }
 
     auto itf = obj.find("files");

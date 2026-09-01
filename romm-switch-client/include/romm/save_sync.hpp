@@ -160,18 +160,45 @@ struct ScanResult {
 
 using RomMatcherFn = std::function<int(const std::string& baseLower, const std::string& slugHint)>;
 using EmulatorOfFn = std::function<std::string(const std::string& path)>;
+// Resolves the ROM-matching slug hint for one scanned asset: (path, isState).
+// Empty return = no hint. Used to scope matching like Grout scopes it to the
+// platform folder: a save under saves/<folder>/ prefers ROMs of that platform.
+using SlugHintFn = std::function<std::string(const std::string& path, bool isState)>;
 
 // Walk savesRoot (battery saves) and statesRoot (save states) recursively
 // (depth <= 3). Matched files are hashed (md5) and stat'd during the scan.
 // Missing roots are fine (empty result). err is set only on real failures.
+// slugHintOf scopes each file's match to a platform slug when non-empty
+// (Grout-style); "" keeps the legacy global match.
 ScanResult scanAssets(const std::string& savesRoot, const std::string& statesRoot,
                       const RomMatcherFn& romMatcher, const EmulatorOfFn& emulatorOf,
-                      std::string& err);
+                      const SlugHintFn& slugHintOf, std::string& err);
+
+// One ROM found on disk under the tico ROMs root.
+struct DiskRom {
+    std::string platformFolder;  // top-level folder under romsRoot (e.g. "snes")
+    std::string subFolder;       // optional game subfolder ("" for root files)
+    std::string baseLower;       // saveLookupBase(fileName), lowercased
+};
+
+// Walk romsRoot (e.g. sdmc:/tico/roms) one level of platform folders plus one
+// optional game subfolder (depth <= 2). For each regular file, record its
+// platform folder, game subfolder, and lookup base. Missing root is fine.
+std::vector<DiskRom> scanDiskRoms(const std::string& romsRoot);
 
 // stat + md5 hash of a file in one pass. Returns false (with *no* guarantee
 // about outputs) if the file can't be opened/read.
 bool computeFileMd5AndStat(const std::string& path, unsigned long long& sizeOut,
                            long long& mtimeOut, std::string& hashOut);
+// Human-facing row labels for the local save/state browser:
+//   "State 0".."State 9" (bare or dotted slots), "Auto" (.auto),
+//   "Base" (plain .state), "Save" (battery-save extensions), "" otherwise.
+std::string saveSlotLabel(const std::string& fileName);
+
+// "2025-08-20T14:03:27Z" -> "2025-08-20 14:03" (formatIso8601Utc shape);
+// anything shorter/other passes through unchanged.
+std::string trimIsoToMinutes(const std::string& iso);
+
 
 // ---------- DTO parse / serialize ----------
 
@@ -181,12 +208,63 @@ struct RemoteAsset {
     std::string fileName;
     unsigned long long fileSizeBytes{0};
     std::string updatedAt;
+    std::string contentHash; // "" unless the server list includes content_hash
     std::string emulator;
     std::string slot; // "" = null
 };
 
 std::vector<RemoteAsset> parseSavesArray(const std::string& json);
 std::vector<RemoteAsset> parseStatesArray(const std::string& json);
+
+// ---------- Client-side reconcile (plan builder + policy) ----------
+
+enum class SyncPolicy { AskEveryTime, NewestWins, ServerWins, ClientWins };
+
+// Parse "ask" | "newest" | "server" | "client" (case-insensitive, trimmed).
+// Anything else -> AskEveryTime.
+SyncPolicy parseSyncPolicy(const std::string& s);
+
+// Canonical lowercase name: "ask" | "newest" | "server" | "client".
+const char* syncPolicyName(SyncPolicy p);
+
+enum class SyncPlanAction { Upload, Download, NoOp };
+
+// One pairable save/state slot: a local file and/or its remote counterpart.
+struct SyncPlanItem {
+    const LocalAsset* local{nullptr}; // null = remote-only (download candidate)
+    bool hasRemote{false};
+    RemoteAsset remote;               // valid when hasRemote
+    bool isState{false};
+    SyncPlanAction newestAction{SyncPlanAction::NoOp}; // policy-independent baseline
+    bool conflict{false};             // equal timestamps, different content hash
+};
+
+// Pair local assets with remote saves+states on (romId, fileName).
+// Locals with romId==0 are skipped; remote-only items appear only when their
+// romId is in knownRomIds (roms with >=1 matched local asset plus every rom
+// id in the caller's rom snapshot). Order: locals in scan order, then
+// remote-only items in fetch order.
+std::vector<SyncPlanItem> buildSyncPlan(const std::vector<LocalAsset>& locals,
+                                        const std::vector<RemoteAsset>& remoteSaves,
+                                        const std::vector<RemoteAsset>& remoteStates,
+                                        const std::vector<long long>& knownRomIds);
+
+// True when the item may change either side: baseline action != NoOp or an
+// unresolved conflict exists.
+bool syncPlanItemActionable(const SyncPlanItem& it);
+
+// True when a winner must be chosen interactively: policy is AskEveryTime,
+// both sides exist, and they differ (newer on either side or conflict).
+bool syncPlanNeedsChoice(const SyncPlanItem& it, SyncPolicy policy);
+
+// Resolve the final action under a policy:
+//   NewestWins   -> newestAction (conflict stays NoOp: winner unknowable)
+//   ServerWins   -> Download when hasRemote, else NoOp (never deletes local)
+//   ClientWins   -> Upload when local exists, else NoOp
+//   AskEveryTime -> newestAction for single-sided items, NoOp for two-sided
+//                   (worker surfaces those via syncPlanNeedsChoice)
+SyncPlanAction resolveSyncAction(const SyncPlanItem& it, SyncPolicy policy);
+
 
 // Serialize the negotiate request body:
 // {"device_id":..., "saves":[{rom_id,file_name,slot,emulator,content_hash,updated_at,file_size_bytes},...]}
@@ -227,6 +305,87 @@ std::string serializeSyncCompleteBody(int completed, int failed);
 std::string formatSaveSyncSummary(int uploaded, int downloaded, int conflicts,
                                   int noOp, int failed, int unmatched);
 
+
+// ---------- Save-sync state persistence (grout save_sync_state) ----------
+
+// One row of the device's save-sync state (mirrors grout's save_sync_state
+// table): what was last synced for (romId, file name) and when.
+struct SyncStateRow {
+    std::string fileName;
+    long long romId{0};
+    std::string slot;
+    long long saveId{0};
+    std::string contentHash;
+    std::string syncedAt;
+};
+
+struct SyncStateStore {
+    std::string deviceId;
+    std::vector<SyncStateRow> rows;
+};
+
+constexpr const char* kSaveSyncStatePath = "sdmc:/switch/romm_switch_client/save_sync_state.json";
+
+// JSON shape:
+//   {"device_id":"...","rows":[{"file_name":...,"rom_id":...,"slot":...,
+//    "save_id":...,"content_hash":...,"synced_at":...}]}
+// Missing file -> empty store + true. Unreadable/corrupt file -> false with
+// an empty store (caller should not clobber it).
+bool loadSyncState(const std::string& path, SyncStateStore& out);
+bool saveSyncState(const std::string& path, const SyncStateStore& s, std::string& err);
+
+// Row for (romId, fileNameLower); row file names compare case-insensitively.
+// nullptr when absent.
+const SyncStateRow* findSyncStateRow(const SyncStateStore& s, long long romId,
+                                     const std::string& fileNameLower);
+
+// Insert or replace in place, keyed by (romId, lowercased fileName). The
+// stored file name is canonicalized to lowercase (grout parity).
+void upsertSyncStateRow(SyncStateStore& s, SyncStateRow row);
+
+// ---------- Server-orchestrated sync plan (negotiate -> executable ops) ----------
+
+// One negotiated operation ready for execution. local points into the
+// caller's locals vector; null for downloads and unpaired ops.
+struct OrchestratedOp {
+    SyncOperation op;
+    const LocalAsset* local{nullptr};
+};
+
+struct OrchestratorPlan {
+    long long sessionId{0};
+    std::vector<OrchestratedOp> ops;
+    int suppressedUploads{0}; // uploads dropped: content unchanged since last sync
+    int skippedDownloads{0};  // downloads dropped: ROM not present on device
+};
+
+// Turn a negotiate response into an executable plan (pure; the worker runs it):
+//   - upload/conflict ops pair to locals by (romId, slot == local.slot),
+//     never by file name;
+//   - uploads whose recorded state-row hash equals the paired local's hash
+//     are suppressed (content already on server), counted in suppressedUploads;
+//   - downloads whose romId is absent from locallyPresentRomIds are skipped
+//     (grout: downloads only apply to games on device), counted in
+//     skippedDownloads;
+//   - conflict ops keep their paired local (may be null); execution decides
+//     via policy;
+//   - no_op ops are dropped; server op order is otherwise preserved.
+OrchestratorPlan buildOrchestratorPlan(const NegotiateResponse& negotiate,
+                                       const std::vector<LocalAsset>& locals,
+                                       const SyncStateStore& state,
+                                       const std::vector<long long>& locallyPresentRomIds);
+
+// Result of one upload/overwrite HTTP round trip.
+struct UploadOutcome {
+    bool ok{false};
+    bool slotConflict{false}; // 409: "Slot has a newer save since your last sync"
+    long long saveId{0};      // parsed response "id" on success, else 0
+};
+
+// 200/201 -> ok (saveId parsed from response JSON "id" when present);
+// 409 -> slotConflict only; anything else -> neither.
+UploadOutcome classifyUploadResponse(long httpStatus, const std::string& body);
+
 // ---------- Multipart + high-level wire ops (thin) ----------
 
 struct MultipartPart {
@@ -258,6 +417,19 @@ struct SyncAuthCtx {
 // else none. Not exercised by host tests (network is stubbed).
 bool fetchRemoteAssets(const SyncAuthCtx&, const char* kind /*"saves"|"states"*/,
                        std::vector<RemoteAsset>& out, std::string& err);
+// Device-scoped variant: appends ?rom_id= and ?device_id= query params for
+// non-empty filters (rom_id first). The signature above delegates here.
+bool fetchRemoteAssets(const SyncAuthCtx&, const char* kind /*"saves"|"states"*/,
+                       const std::string& romIdOrEmpty, const std::string& deviceIdOrEmpty,
+                       std::vector<RemoteAsset>& out, std::string& err);
+
+#ifdef UNIT_TEST
+// Test hook: the exact request URL fetchRemoteAssets builds.
+std::string buildFetchAssetsUrlForTest(const std::string& baseUrl, const char* kind,
+                                       const std::string& romIdOrEmpty,
+                                       const std::string& deviceIdOrEmpty);
+#endif
+
 bool negotiateSync(const SyncAuthCtx&, const std::string& deviceId,
                    const std::vector<LocalAsset>& saves, NegotiateResponse& out,
                    std::string& err);
@@ -271,6 +443,7 @@ bool confirmSaveDownloaded(const SyncAuthCtx&, long long saveId,
 bool uploadNewSave(const SyncAuthCtx&, long long romId, const std::string& slot,
                    const std::string& emulator, const std::string& deviceId,
                    long long sessionId, const std::string& filePath, bool overwrite,
+                   int autocleanupLimit, // SAVE_BACKUP_LIMIT; <=0 -> server default trim (10)
                    std::string& err);
 bool updateExistingSave(const SyncAuthCtx&, long long saveId,
                         const std::string& deviceId, const std::string& filePath,

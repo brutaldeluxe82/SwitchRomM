@@ -1,5 +1,6 @@
 #include "romm/layout.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -24,7 +25,7 @@ const std::vector<std::pair<const char*, const char*>>& ticoFolderMap() {
         {"nes", "nes"},
         {"snes", "snes"},
         {"gb", "gb"},
-        {"gbc", "gba"},
+        {"gbc", "gbc"},
         {"gba", "gba"},
         {"n64", "n64"},
         {"nds", "nds"},
@@ -42,7 +43,6 @@ const std::vector<std::pair<const char*, const char*>>& ticoFolderMap() {
         {"n64dd", "n64"},
         {"vb", "vb"},
         {"neogeo", "neogeo"},
-        {"arcade", "arcade"},
         {"pcengine", "pc-engine"},
         {"tg16", "pc-engine"},
         {"sega32x", "32x"},
@@ -86,7 +86,18 @@ const std::vector<std::pair<const char*, const char*>>& ticoFolderMap() {
         {"dos", "dos"},
         {"ps2", "ps2"},
         {"openbor", "openbor"},
-        {"fds", "fds"},
+        {"fds", "nes"}, // wiki: FDS ROMs live in the NES folder
+        // Stock tico on-device roms folders (user-verified, all lowercase):
+        // 3ds, atomiswave, dc, fbneo, game-gear, gb, gba, gbc, gc, genesis,
+        // master-system, n64, naomi, nes, psp, psx, saturn, sega-cd, snes, wii.
+        // RomM's canonical arcade slug maps to tico's fbneo folder; fbneo is
+        // kept as an alias-style direct entry too.
+        {"atomiswave", "atomiswave"},
+        {"naomi", "naomi"},
+        {"nds", "nds"},
+        {"3ds", "3ds"},
+        {"fbneo", "fbneo"},
+        {"arcade", "fbneo"}, // tico's arcade folder is named fbneo
     };
     return kMap;
 }
@@ -198,6 +209,44 @@ std::string layoutPlatformFolder(const std::string& rommSlug, OutputLayout layou
 
 std::string defaultDownloadDir(OutputLayout layout) {
     return layout == OutputLayout::RetroArch ? "sdmc:/retroarch/downloads" : "sdmc:/tico/roms";
+}
+
+std::vector<std::string> ticoFolderToCanonicalSlugs(const std::string& folder) {
+    const std::string lower = toLower(folder);
+    std::vector<std::string> out;
+    for (const auto& kv : ticoFolderMap()) {
+        if (lower == kv.second) {
+            if (std::find(out.begin(), out.end(), kv.first) == out.end()) {
+                out.push_back(kv.first);
+            }
+        }
+    }
+    return out;
+}
+
+// Defacto tico support list. Base: official wiki (ticoverse.com/wiki/
+// library-and-roms/supported-rom-formats): NES (incl. FDS), SNES, Game Boy,
+// Game Boy Color, Game Boy Advance, Master System, Game Gear, Genesis/Mega
+// Drive, Sega CD, Sega Saturn, Dreamcast, PSX, PSP, GameCube, Wii.
+// Wiki is out of date: atomiswave, naomi, fbneo (arcade), Nintendo 3DS and
+// Nintendo 64 appear in the tico UI, and the ticohq org ships a dedicated
+// melonDS fork (tico-melonds), so Nintendo DS counts as supported too.
+bool platformSupportedByTico(const std::string& rommSlug) {
+    static const std::vector<std::string> kSupported = [] {
+        std::vector<std::string> v;
+        // One canonical slug per entry; aliases normalize into these.
+        for (const char* s : {"nes", "fds", "snes", "gb", "gbc", "gba",
+                              "sms", "gamegear", "genesis", "segacd", "saturn",
+                              "dreamcast", "psx", "psp", "gc", "wii",
+                              "atomiswave", "naomi", "arcade", "fbneo", "3ds",
+                              "n64", "nds"}) {
+            v.emplace_back(s);
+        }
+        return v;
+    }();
+    const std::string canon = normalizeSlug(rommSlug);
+    if (canon.empty()) return false;
+    return std::find(kSupported.begin(), kSupported.end(), canon) != kSupported.end();
 }
 
 std::string defaultBiosDir(OutputLayout layout) {

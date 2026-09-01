@@ -8,6 +8,7 @@
 #include "romm/http_common.hpp"
 #include "romm/md5.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -340,10 +341,13 @@ StateKind classifyStateFileName(const std::string& fileName) {
     std::string rest = lower.substr(pos + 6); // everything after ".state"
     if (rest.empty()) return StateKind::Base;
     if (rest == ".auto") return StateKind::Auto;
-    if (rest.size() >= 2 && rest[0] == '.') {
-        bool allDigits = !rest.empty();
-        for (size_t i = 1; i < rest.size(); ++i) {
-            if (rest[i] < '0' || rest[i] > '9') { allDigits = false; break; }
+    // Tico writes bare slot digits ("game.state0".."game.state3");
+    // legacy layouts use a second dot ("game.state.7").
+    std::string digits = (!rest.empty() && rest[0] == '.') ? rest.substr(1) : rest;
+    if (!digits.empty()) {
+        bool allDigits = true;
+        for (char c : digits) {
+            if (c < '0' || c > '9') { allDigits = false; break; }
         }
         if (allDigits) return StateKind::Numbered;
     }
@@ -358,6 +362,36 @@ std::string formatIso8601Utc(long long epochSeconds) {
     std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &t);
     return std::string(buf);
 }
+// Extension including the dot, lowercased ("" when none).
+std::string extOf(const std::string& lowerName) {
+    size_t dot = lowerName.rfind('.');
+    return dot == std::string::npos ? std::string() : lowerName.substr(dot);
+}
+
+std::string saveSlotLabel(const std::string& fileName) {
+    std::string lower = lowerASCII(fileName);
+    size_t pos = lower.find(".state");
+    if (pos != std::string::npos) {
+        std::string rest = lower.substr(pos + 6); // everything after ".state"
+        if (rest.empty()) return "Base";
+        if (rest == ".auto") return "Auto";
+        // Same shape as classifyStateFileName: bare digits or ".<digits>".
+        std::string digits = (!rest.empty() && rest[0] == '.') ? rest.substr(1) : rest;
+        bool allDigits = !digits.empty();
+        for (char c : digits) {
+            if (c < '0' || c > '9') { allDigits = false; break; }
+        }
+        if (allDigits) return "State " + digits;
+    }
+    if (isValidBatterySaveExtension(extOf(lower))) return "Save";
+    return "";
+}
+
+std::string trimIsoToMinutes(const std::string& iso) {
+    if (iso.size() < 16 || iso[10] != 'T') return iso;
+    return iso.substr(0, 10) + " " + iso.substr(11, 5);
+}
+
 
 std::string saveLookupBase(const std::string& fileNameNoExt) {
     size_t dot = fileNameNoExt.rfind('.');
@@ -401,6 +435,137 @@ std::string decideStateOperation(const LocalAsset* local, const std::string& rem
     return "skip";
 }
 
+// ---------- Client-side reconcile (plan builder + policy) ----------
+
+SyncPolicy parseSyncPolicy(const std::string& s) {
+    std::string v;
+    v.reserve(s.size());
+    for (char c : s) {
+        if (std::isspace((unsigned char)c)) continue;
+        v.push_back((char)std::tolower((unsigned char)c));
+    }
+    if (v == "newest") return SyncPolicy::NewestWins;
+    if (v == "server") return SyncPolicy::ServerWins;
+    if (v == "client") return SyncPolicy::ClientWins;
+    return SyncPolicy::AskEveryTime; // "ask" and anything unknown
+}
+
+const char* syncPolicyName(SyncPolicy p) {
+    switch (p) {
+        case SyncPolicy::NewestWins: return "newest";
+        case SyncPolicy::ServerWins: return "server";
+        case SyncPolicy::ClientWins: return "client";
+        case SyncPolicy::AskEveryTime: break;
+    }
+    return "ask";
+}
+
+namespace {
+
+std::string syncPlanKey(long long romId, const std::string& fileName) {
+    std::ostringstream os;
+    os << romId << '\n' << fileName;
+    return os.str();
+}
+
+// Decide the policy-independent baseline for a paired item. Mirrors
+// decideStateOperation: newest timestamp wins; equal timestamps compare
+// content hashes (no_op when identical, conflict flag when they differ).
+void decideInto(const LocalAsset& local, bool hasRemote, const RemoteAsset& remote,
+                SyncPlanItem& out) {
+    if (!hasRemote) {
+        out.newestAction = SyncPlanAction::Upload;
+        return;
+    }
+    const std::string decision = decideStateOperation(&local, remote.updatedAt,
+                                                      remote.contentHash,
+                                                      local.contentHash);
+    if (decision == "upload") {
+        out.newestAction = SyncPlanAction::Upload;
+    } else if (decision == "download") {
+        out.newestAction = SyncPlanAction::Download;
+    } else {
+        // "no_op" and the genuine-conflict "skip" both stay NoOp; the conflict
+        // flag keeps "skip" visible to ask-policy flows.
+        out.newestAction = SyncPlanAction::NoOp;
+        out.conflict = (decision == "skip");
+    }
+}
+
+} // namespace
+
+std::vector<SyncPlanItem> buildSyncPlan(const std::vector<LocalAsset>& locals,
+                                        const std::vector<RemoteAsset>& remoteSaves,
+                                        const std::vector<RemoteAsset>& remoteStates,
+                                        const std::vector<long long>& knownRomIds) {
+    std::vector<SyncPlanItem> plan;
+
+    std::unordered_map<std::string, size_t> localIdx;
+    localIdx.reserve(locals.size());
+    for (size_t i = 0; i < locals.size(); ++i) {
+        if (locals[i].romId <= 0) continue; // unmatched scan entries are invisible to sync
+        const std::string key = syncPlanKey(locals[i].romId, locals[i].fileName);
+        if (localIdx.find(key) == localIdx.end()) localIdx.emplace(key, plan.size());
+        SyncPlanItem it;
+        it.local = &locals[i];
+        it.isState = locals[i].isState;
+        decideInto(*it.local, false, RemoteAsset{}, it);
+        plan.push_back(it);
+    }
+
+    auto applyRemote = [&](const RemoteAsset& r) {
+        if (r.romId <= 0) return;
+        const std::string key = syncPlanKey(r.romId, r.fileName);
+        auto found = localIdx.find(key);
+        if (found != localIdx.end()) {
+            SyncPlanItem& it = plan[found->second];
+            it.hasRemote = true;
+            it.remote = r;
+            decideInto(*it.local, true, r, it);
+        } else if (std::find(knownRomIds.begin(), knownRomIds.end(), r.romId) != knownRomIds.end()) {
+            SyncPlanItem it;
+            it.hasRemote = true;
+            it.remote = r;
+            it.isState = classifyStateFileName(r.fileName) != StateKind::None;
+            it.newestAction = SyncPlanAction::Download;
+            plan.push_back(it);
+        }
+    };
+    for (const auto& r : remoteSaves) applyRemote(r);
+    for (const auto& r : remoteStates) applyRemote(r);
+    return plan;
+}
+
+bool syncPlanItemActionable(const SyncPlanItem& it) {
+    return it.newestAction != SyncPlanAction::NoOp || it.conflict;
+}
+
+bool syncPlanNeedsChoice(const SyncPlanItem& it, SyncPolicy policy) {
+    if (policy != SyncPolicy::AskEveryTime) return false;
+    if (it.local == nullptr || !it.hasRemote) return false;
+    return it.conflict ||
+           it.newestAction == SyncPlanAction::Upload ||
+           it.newestAction == SyncPlanAction::Download;
+}
+
+SyncPlanAction resolveSyncAction(const SyncPlanItem& it, SyncPolicy policy) {
+    switch (policy) {
+        case SyncPolicy::NewestWins:
+            return it.conflict ? SyncPlanAction::NoOp : it.newestAction;
+        case SyncPolicy::ServerWins:
+            return it.hasRemote ? SyncPlanAction::Download : SyncPlanAction::NoOp;
+        case SyncPolicy::ClientWins:
+            return it.local != nullptr ? SyncPlanAction::Upload : SyncPlanAction::NoOp;
+        case SyncPolicy::AskEveryTime:
+            break;
+    }
+    // AskEveryTime: single-sided items resolve mechanically; two-sided items
+    // wait for the interactive choice (worker collects them instead).
+    if (it.local == nullptr || !it.hasRemote) return it.newestAction;
+    return SyncPlanAction::NoOp;
+}
+
+
 bool computeFileMd5AndStat(const std::string& path, unsigned long long& sizeOut,
                            long long& mtimeOut, std::string& hashOut) {
     std::FILE* f = std::fopen(path.c_str(), "rb");
@@ -431,6 +596,7 @@ namespace {
 // Recursively scan a directory. isStateRoot selects state vs battery-save rules.
 void scanDirRecursive(const std::string& dir, int depth, bool isStateRoot,
                       const RomMatcherFn& romMatcher, const EmulatorOfFn& emulatorOf,
+                      const SlugHintFn& slugHintOf,
                       std::vector<LocalAsset>& out, std::vector<std::string>& unmatched,
                       std::string& err) {
     if (depth > 3) return;
@@ -446,7 +612,7 @@ void scanDirRecursive(const std::string& dir, int depth, bool isStateRoot,
         if (ec2) continue;
         if (isDir) {
             scanDirRecursive(entry.path().string(), depth + 1, isStateRoot, romMatcher,
-                             emulatorOf, out, unmatched, err);
+                             emulatorOf, slugHintOf, out, unmatched, err);
             continue;
         }
 
@@ -480,19 +646,23 @@ void scanDirRecursive(const std::string& dir, int depth, bool isStateRoot,
             if (err.empty()) err = "failed to hash " + path;
             continue;
         }
+
         asset.updatedAtIso = formatIso8601Utc(asset.mtimeEpoch);
-        asset.romId = romMatcher(baseLower, "");
+        asset.romId = romMatcher(baseLower,
+                                 slugHintOf ? slugHintOf(path, isState) : std::string());
         out.push_back(asset);
         if (asset.romId == 0) unmatched.push_back(fileName);
     }
 }
 
 bool scanRoot(const std::string& root, bool isStateRoot, const RomMatcherFn& romMatcher,
-              const EmulatorOfFn& emulatorOf, std::vector<LocalAsset>& out,
-              std::vector<std::string>& unmatched, std::string& err) {
+              const EmulatorOfFn& emulatorOf, const SlugHintFn& slugHintOf,
+              std::vector<LocalAsset>& out, std::vector<std::string>& unmatched,
+              std::string& err) {
     std::error_code ec;
     if (!std::filesystem::is_directory(root, ec)) return true; // missing root is fine
-    scanDirRecursive(root, 0, isStateRoot, romMatcher, emulatorOf, out, unmatched, err);
+    scanDirRecursive(root, 0, isStateRoot, romMatcher, emulatorOf, slugHintOf,
+                     out, unmatched, err);
     return true;
 }
 
@@ -500,12 +670,58 @@ bool scanRoot(const std::string& root, bool isStateRoot, const RomMatcherFn& rom
 
 ScanResult scanAssets(const std::string& savesRoot, const std::string& statesRoot,
                       const RomMatcherFn& romMatcher, const EmulatorOfFn& emulatorOf,
-                      std::string& err) {
+                      const SlugHintFn& slugHintOf, std::string& err) {
     err.clear();
     ScanResult result;
-    scanRoot(savesRoot, false, romMatcher, emulatorOf, result.assets, result.unmatched, err);
-    scanRoot(statesRoot, true, romMatcher, emulatorOf, result.assets, result.unmatched, err);
+    scanRoot(savesRoot, false, romMatcher, emulatorOf, slugHintOf, result.assets,
+             result.unmatched, err);
+    scanRoot(statesRoot, true, romMatcher, emulatorOf, slugHintOf, result.assets,
+             result.unmatched, err);
     return result;
+}
+
+std::vector<DiskRom> scanDiskRoms(const std::string& romsRoot) {
+    std::vector<DiskRom> out;
+    std::error_code ec;
+    if (!std::filesystem::is_directory(romsRoot, ec)) return out; // missing root is fine
+    std::filesystem::directory_iterator platformIt(romsRoot, ec);
+    if (ec) return out;
+    for (auto const& plat : platformIt) {
+        std::error_code ec2;
+        if (!plat.is_directory(ec2) || ec2) continue;
+        const std::string platformFolder = plat.path().filename().string();
+        auto record = [&](const std::filesystem::directory_entry& f,
+                          const std::string& subFolder) {
+            DiskRom rom;
+            rom.platformFolder = platformFolder;
+            rom.subFolder = subFolder;
+            rom.baseLower = lowerASCII(saveLookupBase(f.path().stem().string()));
+            out.push_back(std::move(rom));
+        };
+        // Pass 1: ROM files directly in the platform folder.
+        std::filesystem::directory_iterator topIt(plat.path(), ec2);
+        if (ec2) continue;
+        for (auto const& entry : topIt) {
+            std::error_code ec3;
+            if (!entry.is_regular_file(ec3) || ec3) continue;
+            record(entry, "");
+        }
+        // Pass 2: ROM files inside one optional game subfolder.
+        std::filesystem::directory_iterator subIt(plat.path(), ec2);
+        if (ec2) continue;
+        for (auto const& sub : subIt) {
+            std::error_code ec3;
+            if (!sub.is_directory(ec3) || ec3) continue;
+            std::filesystem::directory_iterator fit(sub.path(), ec3);
+            if (ec3) continue;
+            for (auto const& f : fit) {
+                std::error_code ec4;
+                if (!f.is_regular_file(ec4) || ec4) continue;
+                record(f, sub.path().filename().string());
+            }
+        }
+    }
+    return out;
 }
 
 // ---------- DTO parse / serialize ----------
@@ -525,6 +741,8 @@ RemoteAsset parseRemoteAsset(const mini::Value& v) {
         a.fileSizeBytes = (unsigned long long)it->second.number;
     if (auto it = v.object.find("updated_at"); it != v.object.end() && it->second.type == mini::Value::Type::String)
         a.updatedAt = it->second.str;
+    if (auto it = v.object.find("content_hash"); it != v.object.end() && it->second.type == mini::Value::Type::String)
+        a.contentHash = it->second.str;
     if (auto it = v.object.find("emulator"); it != v.object.end() && it->second.type == mini::Value::Type::String)
         a.emulator = it->second.str;
     if (auto it = v.object.find("slot"); it != v.object.end() && it->second.type == mini::Value::Type::String)
@@ -641,6 +859,183 @@ std::string formatSaveSyncSummary(int uploaded, int downloaded, int conflicts,
     return os.str();
 }
 
+// ---------- Save-sync state persistence (grout save_sync_state) ----------
+
+namespace {
+
+// Canonical key of a state row: rom id + lowercased file name.
+std::string syncStateKey(long long romId, const std::string& fileName) {
+    std::ostringstream os;
+    os << romId << '\n' << lowerASCII(fileName);
+    return os.str();
+}
+
+// A row is usable when it names a file and belongs to a ROM.
+bool syncStateRowUsable(const SyncStateRow& r) {
+    return r.romId > 0 && !r.fileName.empty();
+}
+
+bool parseSyncStateJson(const std::string& json, SyncStateStore& out) {
+    out = SyncStateStore{};
+    mini::Object obj;
+    if (!mini::parse(json, obj)) return false;
+    getStringField(obj, "device_id", out.deviceId);
+    auto rows = obj.find("rows");
+    if (rows == obj.end() || rows->second.type != mini::Value::Type::Array) return true;
+    for (const auto& v : rows->second.array) {
+        if (v.type != mini::Value::Type::Object) continue;
+        SyncStateRow row;
+        getStringField(v.object, "file_name", row.fileName);
+        if (auto it = v.object.find("rom_id"); it != v.object.end() && it->second.type == mini::Value::Type::Number)
+            row.romId = (long long)it->second.number;
+        getStringField(v.object, "slot", row.slot);
+        if (auto it = v.object.find("save_id"); it != v.object.end() && it->second.type == mini::Value::Type::Number)
+            row.saveId = (long long)it->second.number;
+        getStringField(v.object, "content_hash", row.contentHash);
+        getStringField(v.object, "synced_at", row.syncedAt);
+        if (syncStateRowUsable(row)) out.rows.push_back(std::move(row));
+    }
+    return true;
+}
+
+} // namespace
+
+bool loadSyncState(const std::string& path, SyncStateStore& out) {
+    out = SyncStateStore{};
+    std::string content;
+    // Missing file = nothing synced yet: empty store, success.
+    if (!readTextFile(path, content)) return true;
+    return parseSyncStateJson(content, out);
+}
+
+bool saveSyncState(const std::string& path, const SyncStateStore& s, std::string& err) {
+    err.clear();
+    std::ostringstream os;
+    os << "{";
+    os << "\"device_id\":\"" << escapeJson(s.deviceId) << "\",";
+    os << "\"rows\":[";
+    for (size_t i = 0; i < s.rows.size(); ++i) {
+        if (i) os << ",";
+        const SyncStateRow& r = s.rows[i];
+        os << "{";
+        os << "\"file_name\":\"" << escapeJson(r.fileName) << "\",";
+        os << "\"rom_id\":" << r.romId << ",";
+        os << "\"slot\":" << (r.slot.empty() ? "null" : "\"" + escapeJson(r.slot) + "\"") << ",";
+        os << "\"save_id\":" << r.saveId << ",";
+        os << "\"content_hash\":" << (r.contentHash.empty() ? "null" : "\"" + escapeJson(r.contentHash) + "\"") << ",";
+        os << "\"synced_at\":\"" << escapeJson(r.syncedAt) << "\"";
+        os << "}";
+    }
+    os << "]}";
+    if (!writeTextFileEnsureParent(path, os.str())) {
+        err = "failed to write save sync state to " + path;
+        return false;
+    }
+    return true;
+}
+
+const SyncStateRow* findSyncStateRow(const SyncStateStore& s, long long romId,
+                                     const std::string& fileNameLower) {
+    const std::string key = syncStateKey(romId, fileNameLower);
+    for (const SyncStateRow& r : s.rows) {
+        if (syncStateKey(r.romId, r.fileName) == key) return &r;
+    }
+    return nullptr;
+}
+
+void upsertSyncStateRow(SyncStateStore& s, SyncStateRow row) {
+    if (!syncStateRowUsable(row)) return;
+    row.fileName = lowerASCII(row.fileName);
+    const std::string key = syncStateKey(row.romId, row.fileName);
+    for (SyncStateRow& r : s.rows) {
+        if (syncStateKey(r.romId, r.fileName) == key) {
+            r = std::move(row);
+            return;
+        }
+    }
+    s.rows.push_back(std::move(row));
+}
+
+// ---------- Server-orchestrated sync plan (negotiate -> executable ops) ----------
+
+namespace {
+
+// First local whose romId matches the op and whose slot matches exactly
+// (both empty counts as equal). File name is deliberately ignored: the
+// server keys slots, the device names files.
+const LocalAsset* pairLocalByRomSlot(const SyncOperation& op,
+                                     const std::vector<LocalAsset>& locals) {
+    for (const LocalAsset& l : locals) {
+        if ((long long)l.romId != op.romId) continue;
+        if (l.slot != op.slot) continue;
+        return &l;
+    }
+    return nullptr;
+}
+
+bool romIdPresent(const std::vector<long long>& romIds, long long romId) {
+    return std::find(romIds.begin(), romIds.end(), romId) != romIds.end();
+}
+
+} // namespace
+
+OrchestratorPlan buildOrchestratorPlan(const NegotiateResponse& negotiate,
+                                       const std::vector<LocalAsset>& locals,
+                                       const SyncStateStore& state,
+                                       const std::vector<long long>& locallyPresentRomIds) {
+    OrchestratorPlan plan;
+    plan.sessionId = negotiate.sessionId;
+    for (const SyncOperation& op : negotiate.operations) {
+        const bool isUploadLike = (op.action == "upload" || op.action == "conflict");
+        if (isUploadLike) {
+            OrchestratedOp o;
+            o.op = op;
+            o.local = pairLocalByRomSlot(op, locals);
+            if (op.action == "upload" && o.local != nullptr) {
+                const SyncStateRow* row =
+                    findSyncStateRow(state, op.romId, lowerASCII(op.fileName));
+                if (row != nullptr && row->contentHash == o.local->contentHash) {
+                    ++plan.suppressedUploads; // file unchanged since last sync
+                    continue;
+                }
+            }
+            plan.ops.push_back(std::move(o));
+            continue;
+        }
+        if (op.action == "download") {
+            if (!romIdPresent(locallyPresentRomIds, op.romId)) {
+                ++plan.skippedDownloads; // grout: downloads only for games on device
+                continue;
+            }
+        }
+        if (op.action == "no_op") continue; // nothing to do
+        OrchestratedOp o;
+        o.op = op;
+        // Only upload/conflict pair to a local; downloads fetch remote
+        // content and never reference one (spec: local is null for them).
+        o.local = isUploadLike ? pairLocalByRomSlot(op, locals) : nullptr;
+        plan.ops.push_back(std::move(o));
+    }
+    return plan;
+}
+
+UploadOutcome classifyUploadResponse(long httpStatus, const std::string& body) {
+    UploadOutcome out;
+    if (httpStatus == 409) {
+        out.slotConflict = true;
+        return out;
+    }
+    if (httpStatus < 200 || httpStatus >= 300) return out;
+    out.ok = true;
+    mini::Object obj;
+    if (mini::parse(body, obj)) {
+        if (auto it = obj.find("id"); it != obj.end() && it->second.type == mini::Value::Type::Number)
+            out.saveId = (long long)it->second.number;
+    }
+    return out;
+}
+
+
 // ---------- Multipart ----------
 
 std::string buildMultipartBody(const std::vector<MultipartPart>& parts, const std::string& boundary) {
@@ -656,13 +1051,34 @@ std::string buildMultipartBody(const std::vector<MultipartPart>& parts, const st
     os << "--" << boundary << "--\r\n";
     return os.str();
 }
+// Mirrors exactly the URL fetchRemoteAssets requests. Declared in the header
+// only under UNIT_TEST; defined unconditionally so fetchRemoteAssets shares it.
+std::string buildFetchAssetsUrlForTest(const std::string& baseUrl, const char* kind,
+                                       const std::string& romIdOrEmpty,
+                                       const std::string& deviceIdOrEmpty) {
+    std::string url = joinUrl(baseUrl, std::string("/api/") + kind);
+    std::string query;
+    if (!romIdOrEmpty.empty()) query += "rom_id=" + percentEncode(romIdOrEmpty);
+    if (!deviceIdOrEmpty.empty()) {
+        if (!query.empty()) query += "&";
+        query += "device_id=" + percentEncode(deviceIdOrEmpty);
+    }
+    if (!query.empty()) url += "?" + query;
+    return url;
+}
 
 // ---------- High-level wire ops ----------
 
 bool fetchRemoteAssets(const SyncAuthCtx& ctx, const char* kind, std::vector<RemoteAsset>& out,
                        std::string& err) {
+    return fetchRemoteAssets(ctx, kind, std::string(), std::string(), out, err);
+}
+
+bool fetchRemoteAssets(const SyncAuthCtx& ctx, const char* kind,
+                       const std::string& romIdOrEmpty, const std::string& deviceIdOrEmpty,
+                       std::vector<RemoteAsset>& out, std::string& err) {
     out.clear();
-    std::string url = joinUrl(ctx.baseUrl, std::string("/api/") + kind);
+    std::string url = buildFetchAssetsUrlForTest(ctx.baseUrl, kind, romIdOrEmpty, deviceIdOrEmpty);
     std::vector<std::pair<std::string, std::string>> headers;
     appendAuthHeader(ctx, headers);
     std::string body;
@@ -750,14 +1166,17 @@ static bool multipartUpload(const SyncAuthCtx& ctx, const std::string& method,
 bool uploadNewSave(const SyncAuthCtx& ctx, long long romId, const std::string& slot,
                    const std::string& emulator, const std::string& deviceId,
                    long long sessionId, const std::string& filePath, bool overwrite,
-                   std::string& err) {
+                   int autocleanupLimit, std::string& err) {
     std::string url = joinUrl(ctx.baseUrl, "/api/saves") +
                       "?rom_id=" + std::to_string(romId);
     if (!slot.empty()) url += "&slot=" + percentEncode(slot);
     if (!emulator.empty()) url += "&emulator=" + percentEncode(emulator);
     url += "&device_id=" + percentEncode(deviceId);
-    url += "&session_id=" + std::to_string(sessionId);
+    if (sessionId > 0) url += "&session_id=" + std::to_string(sessionId);
     if (overwrite) url += "&overwrite=true";
+    // Grout trims server-side slot history (autocleanup=true, limit=10 on the
+    // 'autosave' slot); our SAVE_BACKUP_LIMIT setting (0 = no limit) maps onto it.
+    url += "&autocleanup=true&autocleanup_limit=" + std::to_string(autocleanupLimit <= 0 ? 10 : autocleanupLimit);
     return multipartUpload(ctx, "POST", url, "saveFile", filePath, err);
 }
 

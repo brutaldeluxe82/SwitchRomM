@@ -33,6 +33,17 @@ struct Config {
     // Extract .zip archives on download (tico layout only); arcade-class romsets
     // (FBNeo/MAME cores) must have this false to keep archives intact.
     bool extractArchive{true};
+    // Hide RomM platforms without a tico emulator/core (defaults on). Toggles
+    // in General settings; affects the platform list + platform count labels.
+    bool hideUnsupportedPlatforms{true};
+    // Save sync conflict policy: ask | newest | server | client
+    std::string saveSyncBehavior{"ask"};
+    // Save backup retention limit for synced saves (0 = no limit; Grout offers 5/10/15).
+    int saveBackupLimit{0};
+    // Per-download timeout in minutes; clamped to [15,120] when parsed from config.
+    int downloadTimeoutMinutes{60};
+    // Device registration name shown on the server (editable in settings).
+    std::string deviceName{"Switch"};
     // Logging verbosity (debug, info, warn, error)
     std::string logLevel{"info"};
     // Optional URL to fetch ~10MB for a quick throughput estimate; blank to skip.

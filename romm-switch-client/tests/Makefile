@@ -53,12 +53,19 @@ SOURCES := ../source/api.cpp \
            test_md5.cpp \
            test_save_sync.cpp \
            test_save_sync_engine.cpp \
+           test_sync_orchestrator.cpp \
            logger_stub.cpp
 
 all: $(TARGET)
 
 $(TARGET): $(SOURCES)
 	$(CXX) $(CXXFLAGS) -o $@ $(SOURCES) -lminizip -lz
+live: romm_live_tests
+
+romm_live_tests: romm_live_tests.cpp ../source/save_sync.cpp ../source/http_common.cpp ../source/md5.cpp logger_stub.cpp
+	$(CXX) -std=c++17 -Wall -I../include -o $@ romm_live_tests.cpp ../source/save_sync.cpp ../source/http_common.cpp ../source/md5.cpp logger_stub.cpp -lcurl -lpthread
+
+.PHONY: live
 
 .PHONY: clean
 clean:

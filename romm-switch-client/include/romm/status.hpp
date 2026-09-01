@@ -35,6 +35,30 @@ struct WorkerEvent {
     std::string message;
 };
 
+struct SyncPlatformRow {
+    std::string slug;      // canonical slug hint derived from the on-disk folder
+    std::string name;      // display name (server platform name, else folder)
+    int saveCount{0};      // battery saves found under this platform
+    int stateCount{0};     // save states found under this platform
+};
+
+struct SyncGameRow {
+    std::string romId;          // key: "rid:<id>" when matched to a server ROM, else "f:<basename>"
+    long long displayRomId{0};  // 0 = no known server ROM (local-only)
+    std::string name;           // game display name (server title, else basename)
+    int fileCount{0};           // saves + states in this game's group
+    int saveCount{0};           // files under the SAVES group
+    int stateCount{0};          // files under the STATES group
+};
+
+struct SyncFileRow {
+    std::string fileName;       // full on-disk path (kept for future passes)
+    std::string gameKey;        // grouping key, matches SyncGameRow::romId
+    bool isState{false};
+    std::string slotLabel;      // "State 0" / "Auto" / "Base" / "Save"
+    std::string updatedAtIso;   // local mtime, formatIso8601Utc shape
+};
+
 struct Status {
     // TODO(thread-safety): use this mutex (or an event queue) to guard shared state between UI and worker.
     mutable std::mutex mutex;
@@ -43,7 +67,7 @@ struct Status {
     bool validCredentials{false};
 
     // Current UI/view state
-    enum class View { PLATFORMS, ROMS, DETAIL, QUEUE, ERROR, DOWNLOADING, DIAGNOSTICS, UPDATER, SETTINGS, LOGIN } currentView{View::PLATFORMS};
+    enum class View { PLATFORMS, ROMS, DETAIL, QUEUE, ERROR, DOWNLOADING, DIAGNOSTICS, UPDATER, SETTINGS, LOGIN, SYNCROMS, GAMESAVES } currentView{View::PLATFORMS};
 
     // Data loaded from API
     std::vector<Platform> platforms;
@@ -57,11 +81,12 @@ struct Status {
     uint64_t romListOptionsRevision{0};
     PlatformPrefs platformPrefs;
 
-    // PLATFORMS is a dual-mode index: ROM (default) and BIOS. ZR/ZL cycle modes.
-    enum class PlatformIndexMode { Rom, Bios };
+    // PLATFORMS is a tri-mode index: ROM (default), BIOS, and SYNC. ZR/ZL cycle modes.
+    enum class PlatformIndexMode { Rom, Bios, Sync };
     PlatformIndexMode platformIndexMode{PlatformIndexMode::Rom};
     int selectedPlatformIndex{0};
     int selectedBiosPlatformIndex{0}; // independent selection for the BIOS index mode
+    int selectedSyncPlatformIndex{0}; // independent selection for the SYNC index mode
     int selectedRomIndex{0};
     int selectedQueueIndex{0};
     bool queueReorderActive{false}; // when true in QUEUE: D-pad reorders the selected item instead of moving cursor
@@ -73,6 +98,8 @@ struct Status {
     View prevQueueView{View::ROMS}; // where to return when leaving queue
     View prevDiagnosticsView{View::PLATFORMS}; // where to return when leaving diagnostics
     View prevUpdaterView{View::PLATFORMS}; // where to return when leaving updater
+    View prevSyncRomsView{View::PLATFORMS}; // where SYNCROMS returns when leaving
+    View prevSyncGamesView{View::PLATFORMS}; // where GAMESAVES returns when leaving
     View prevSettingsView{View::PLATFORMS}; // where to return when leaving settings
     View prevLoginView{View::PLATFORMS};    // where to return after pairing/login
 
@@ -134,9 +161,29 @@ struct Status {
     bool saveServerDeviceAuthSupported{false};
     std::string saveServerVersion;  // from heartbeat probe
 
+    // ---- Local save/state discovery (SYNC index, SYNCROMS, GAMESAVES) ----
+    std::vector<SyncFileRow> syncFiles;         // every discovered file (flat)
+    std::vector<int> syncFilesForGame;          // indices into syncFiles for the open game+type filter
+    std::vector<SyncPlatformRow> syncPlatforms; // one row per on-disk platform folder
+    uint64_t syncPlanRevision{0};               // bump on each completed local scan
+    std::string syncStatusText;                 // status line for the discovery UI
+    int selectedSyncRomIndex{0};                // cursor inside SYNCROMS list
+    int selectedSaveGroupIndex{0};              // cursor inside GAMESAVES SAVES/STATES rows
+    std::string syncPlatformSlug;               // scope of the open SYNCROMS view
+    std::string syncPlatformName;
+    std::vector<SyncGameRow> syncGames;         // per-game rows under the open platform
+    std::string selectedSyncGameKey;            // key of the drilled-into game
+    std::string selectedSyncGameName;           // title for the GAMESAVES header
+    bool syncGameFilesOpen{false};              // GAMESAVES: false=group rows, true=file rows under the chosen group
+    bool syncGameTypeStates{false};             // GAMESAVES group selection: false=SAVES, true=STATES
+
     // Settings view (Plus): selected row in the settings menu.
     int selectedSettingsIndex{0};
     std::string settingsStatus; // inline feedback line (save errors, sign-out, rejections)
+
+    std::string pairedDeviceId;   // set when pairing completes; persisted via device_token.json
+    std::atomic<bool> saveSyncRunBusy{false};
+    std::string saveSyncStatusText; // latest orchestrated-sync run summary or error
 
     // Updater state (GitHub latest release check + staged .nro download)
     bool updateCheckInFlight{false};

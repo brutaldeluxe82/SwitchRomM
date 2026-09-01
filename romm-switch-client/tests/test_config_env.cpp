@@ -56,6 +56,52 @@ TEST_CASE("parseEnvString accepts https scheme") {
     REQUIRE(cfg.serverUrl == "https://good");
 }
 
+TEST_CASE("parseEnvString parses grout settings with clamping") {
+    const std::string env =
+        "server_url=http://example.com\n"
+        "save_backup_limit=10\n"
+        "download_timeout_minutes=200\n"
+        "device_name=Living Room Switch\n";
+    romm::Config cfg;
+    std::string err;
+    bool ok = romm::parseEnvString(env, cfg, err);
+    REQUIRE(ok);
+    REQUIRE(err.empty());
+    REQUIRE(cfg.saveBackupLimit == 10);
+    REQUIRE(cfg.downloadTimeoutMinutes == 120); // clamped from 200
+    REQUIRE(cfg.deviceName == "Living Room Switch");
+}
+
+TEST_CASE("parseEnvString clamps and defaults grout settings") {
+    // Negative backup limit disables retention; timeout floor is 15.
+    {
+        romm::Config cfg;
+        std::string err;
+        REQUIRE(romm::parseEnvString(
+            "server_url=http://x\nsave_backup_limit=-3\ndownload_timeout_minutes=5\n", cfg, err));
+        REQUIRE(cfg.saveBackupLimit == 0);
+        REQUIRE(cfg.downloadTimeoutMinutes == 15);
+    }
+    // Boundary values pass through unclamped.
+    {
+        romm::Config cfg;
+        std::string err;
+        REQUIRE(romm::parseEnvString(
+            "server_url=http://x\nsave_backup_limit=15\ndownload_timeout_minutes=120\n", cfg, err));
+        REQUIRE(cfg.saveBackupLimit == 15);
+        REQUIRE(cfg.downloadTimeoutMinutes == 120);
+    }
+    // Keys absent: defaults preserve current behavior (no limit, 60 min).
+    {
+        romm::Config cfg;
+        std::string err;
+        REQUIRE(romm::parseEnvString("server_url=http://x\n", cfg, err));
+        REQUIRE(cfg.saveBackupLimit == 0);
+        REQUIRE(cfg.downloadTimeoutMinutes == 60);
+        REQUIRE(cfg.deviceName == "Switch");
+    }
+}
+
 TEST_CASE("parseEnvString rejects unsupported scheme") {
     const std::string env =
         "server_url=ftp://bad\n"
