@@ -1,1 +1,0 @@
-=== NOW the real question: on this screen there are NO menu items. Layout handler at line 159 catches Y. But does BuildCurrentScreen get called AT ALL after the failed boot fetch? Check where boot failure - set, and does PlatformSelection rebuild loop every frame? ===
