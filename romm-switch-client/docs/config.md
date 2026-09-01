@@ -1,6 +1,6 @@
 # Config
 
- Put `.env` at `sdmc:/switch/romm_switch_client/.env`. `config.json` in the same directory is also read; current load order is `.env` then `config.json`, so JSON overrides `.env` on the same key. JSON supports schema migration (`schema_version`), and missing `schema_version` is treated as legacy schema and migrated to current keys.
+ Put `.env` at `sdmc:/switch/TicromM/.env`. `config.json` in the same directory is also read; current load order is `.env` then `config.json`, so JSON overrides `.env` on the same key. JSON supports schema migration (`schema_version`), and missing `schema_version` is treated as legacy schema and migrated to current keys.
 
 ## Keys (with defaults)
 - `SERVER_URL` (required): Base RomM URL. **Supports `http://` and `https://`.** Example: `https://192.168.1.10:8080`.
@@ -37,8 +37,8 @@
 
 ## Files created by the client
 - Downloads: `<DOWNLOAD_DIR>/<Title or fsName>_<id>.<ext>` (single file, ID-suffixed for collisions) or `<DOWNLOAD_DIR>/<Title or fsName>_<id>.<ext>/00 01 ...` (multi-part DBI layout).
-- Device token: `sdmc:/switch/romm_switch_client/device_token.json` (written after
+- Device token: `sdmc:/switch/TicromM/device_token.json` (written after
   successful device pairing from the DIAGNOSTICS view; delete it to un-pair).
 - Temps: `<DOWNLOAD_DIR>/temp/<safe-12>.tmp/*.part` and `manifest.json` (safe to delete after failures/stops).
-- Log: `sdmc:/switch/romm_switch_client/log.txt`.
-- Queue snapshot: `sdmc:/switch/romm_switch_client/queue_state.json` (pending/running queue items restored on restart; completed items are skipped).
+- Log: `sdmc:/switch/TicromM/log.txt`.
+- Queue snapshot: `sdmc:/switch/TicromM/queue_state.json` (pending/running queue items restored on restart; completed items are skipped).

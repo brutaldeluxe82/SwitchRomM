@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <string>
+#include "romm/config.hpp"
 #include <vector>
 
 namespace romm {
@@ -21,7 +22,7 @@ bool parseDeviceTokenJson(const std::string& json, DeviceToken& out);
 // Serialize a device token to a compact JSON object.
 std::string serializeDeviceTokenJson(const DeviceToken& t);
 
-constexpr const char* kDeviceTokenPath = "sdmc:/switch/romm_switch_client/device_token.json";
+inline constexpr const char* kDeviceTokenPath = "sdmc:/switch/TicromM/device_token.json";
 
 // Load/save a device token at an explicit path (fopen-based, like self_update).
 bool loadDeviceToken(const std::string& path, DeviceToken& out);
@@ -324,7 +325,7 @@ struct SyncStateStore {
     std::vector<SyncStateRow> rows;
 };
 
-constexpr const char* kSaveSyncStatePath = "sdmc:/switch/romm_switch_client/save_sync_state.json";
+inline constexpr const char* kSaveSyncStatePath = "sdmc:/switch/TicromM/save_sync_state.json";
 
 // JSON shape:
 //   {"device_id":"...","rows":[{"file_name":...,"rom_id":...,"slot":...,

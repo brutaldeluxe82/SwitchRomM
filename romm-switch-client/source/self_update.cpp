@@ -73,7 +73,7 @@ bool fileLooksLikeNro(const std::string& path) {
 }
 
 std::string computeUpdateDirFromDownloadDir(const std::string& downloadDir) {
-    if (downloadDir.empty()) return "sdmc:/switch/romm_switch_client/app_update";
+    if (downloadDir.empty()) return std::string(kAppDataDir) + "/app_update";
     // Keep behavior simple and predictable, even for "sdmc:/..." scheme paths.
     if (!downloadDir.empty() && (downloadDir.back() == '/' || downloadDir.back() == '\\')) {
         return downloadDir.substr(0, downloadDir.size() - 1) + "/app_update";
@@ -82,11 +82,11 @@ std::string computeUpdateDirFromDownloadDir(const std::string& downloadDir) {
 }
 
 std::string defaultStagedUpdatePath(const std::string& updateDir) {
-    return (std::filesystem::path(updateDir) / "romm-switch-client.nro.new").string();
+    return (std::filesystem::path(updateDir) / "TicromM.nro.new").string();
 }
 
 std::string defaultBackupPath(const std::string& updateDir) {
-    return (std::filesystem::path(updateDir) / "romm-switch-client.nro.bak").string();
+    return (std::filesystem::path(updateDir) / "TicromM.nro.bak").string();
 }
 
 ApplySelfUpdateResult applyPendingSelfUpdate(const std::string& selfNroPath,

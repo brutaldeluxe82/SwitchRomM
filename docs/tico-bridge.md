@@ -65,7 +65,7 @@ The bridge is implemented in SwitchRomM as of `main`:
   platform's firmware through the standard download queue/worker).
 - **Save/state sync** (saves AND states): device-auth pairing
   (`/api/auth/device/init`, `/api/auth/device/token`, token persisted at
-  `sdmc:/switch/romm_switch_client/device_token.json`), then per run:
+  `sdmc:/switch/TicromM/device_token.json`), then per run:
   disk-driven discovery → scan local saves/states → fetch remote saves + states →
   client-side reconcile (`buildSyncPlan`: newest timestamp wins; equal timestamps
   compare content hashes) → multipart uploads (`saveFile`/`stateFile`), binary
@@ -137,7 +137,7 @@ The bridge is implemented in SwitchRomM as of `main`:
   file into `.backup/` first, atomic temp+rename write, mtime set to the
   server's updated_at, `POST /api/saves/{id}/downloaded` confirm) →
   `POST /api/sync/sessions/{id}/complete`. Applied operations update
-  `sdmc:/switch/romm_switch_client/save_sync_state.json` (keyed
+  `sdmc:/switch/TicromM/save_sync_state.json` (keyed
   rom_id + file_name with slot/save_id/hash/synced_at) so unchanged saves are
   never re-uploaded. Save **states** remain client-side
   (`decideStateOperation` newest-wins/policy) because the orchestrator tracks

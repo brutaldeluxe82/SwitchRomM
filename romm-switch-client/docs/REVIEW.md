@@ -1,4 +1,4 @@
-# RomM Switch Client - Technical Review
+# TicromM - Technical Review
 
 Quick review of the C++17/libnx/SDL2 codebase: architecture, flows, risks, and pointers for contributors.  
 Last updated: 2026-02-11 (controls positional: A=Back/B=Select/Y=Queue/X=Start, Minus=Search, R=Diagnostics gate; revision-keyed ROM search/filter/sort index; diagnostics view/export; config schema_version migration support for JSON; per-file download HUD progress and queue failure retention summary; queue snapshot restore across restarts; worker->UI status event channel; UTF-8 title preservation with ASCII folding at render/search; free-space recheck on part rotation; resume contiguity enforced; title_id folders; chunked fail-fast; redirect logged with Location; speed test optional; FAT32 splitting toggle).

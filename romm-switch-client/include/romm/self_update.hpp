@@ -4,12 +4,14 @@
 #include <functional>
 #include <string>
 
+#include "romm/config.hpp"
+
 namespace romm {
 
 // Canonical location enforced for the installed app. If argv0 isn't a .nro under sdmc:/switch/,
 // fall back to the default homebrew install path.
 std::string canonicalSelfNroPath(const std::string& argv0,
-                                 const std::string& fallback = "sdmc:/switch/romm_switch_client/romm-switch-client.nro");
+                                 const std::string& fallback = "sdmc:/switch/TicromM/TicromM.nro");
 
 // Read a small text file and trim surrounding whitespace/newlines.
 bool readTextFileTrim(const std::string& path, std::string& out);

@@ -93,7 +93,7 @@ TEST_CASE("classify 400 unknown detail -> Error") {
 TEST_CASE("init body contains all nine scopes") {
     romm::DeviceAuthInitRequest r;
     r.name = "Switch";
-    r.client = "romm-switch-client";
+    r.client = "TicromM";
     r.clientVersion = "0.2.8";
     r.clientDeviceIdentifier = "switch-01";
     std::string body = romm::serializeDeviceAuthInitBody(r);
@@ -157,7 +157,7 @@ TEST_CASE("serverSupportsDeviceAuth gate") {
 // ---------- load/save round-trip via temp file ----------
 
 TEST_CASE("save then load device token round-trips via file") {
-    const char* path = "/tmp/romm_switch_client_test_device_token.json";
+    const char* path = "/tmp/TicromM_test_device_token.json";
     romm::DeviceToken t;
     t.accessToken = "tok_file";
     t.deviceId = "dev_file";

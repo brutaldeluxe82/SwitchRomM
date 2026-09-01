@@ -20,7 +20,7 @@ TEST_CASE("Parse GitHub latest release JSON and pick NRO", "[update]") {
   "published_at": "2026-02-15T00:00:00Z",
   "assets": [
     { "name": "something.txt", "browser_download_url": "https://example.com/a.txt", "size": 10 },
-    { "name": "romm-switch-client.nro", "browser_download_url": "https://example.com/romm-switch-client.nro", "size": 1234 }
+    { "name": "TicromM.nro", "browser_download_url": "https://example.com/TicromM.nro", "size": 1234 }
   ]
 }
 )JSON";
@@ -32,8 +32,8 @@ TEST_CASE("Parse GitHub latest release JSON and pick NRO", "[update]") {
     REQUIRE(!rel.assets.empty());
 
     romm::GitHubAsset asset;
-    REQUIRE(romm::pickReleaseNroAsset(rel, asset, err, "romm-switch-client.nro"));
-    REQUIRE(asset.name == "romm-switch-client.nro");
+    REQUIRE(romm::pickReleaseNroAsset(rel, asset, err, "TicromM.nro"));
+    REQUIRE(asset.name == "TicromM.nro");
     REQUIRE(asset.downloadUrl.find(".nro") != std::string::npos);
     REQUIRE(asset.sizeBytes == 1234);
 }

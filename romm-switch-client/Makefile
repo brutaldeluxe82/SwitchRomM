@@ -19,14 +19,14 @@ include $(DEVKITPRO)/libnx/switch_rules
 #---------------------------------------------------------------------------------
 # Project settings
 #---------------------------------------------------------------------------------
-TARGET      := romm-switch-client
+TARGET      := TicromM
 BUILD       := build
 SOURCES     := source source/ui third_party/qrcodegen
 INCLUDES    := include Plutonium/Plutonium/include third_party/qrcodegen
 
-APP_TITLE   := RomM Switch Client
-APP_AUTHOR  := Shalasere
-APP_VERSION := 0.2.8
+APP_TITLE   := TicromM
+APP_AUTHOR  := Olly Ainger
+APP_VERSION := 1.0.0
 ICON        := assets/icon.jpg
 
 CURL_CFLAGS := $(shell curl-config --cflags 2>/dev/null)

@@ -17,7 +17,7 @@
 - Failures show a red "Failed: ." line. Short reads trigger a retry; if Range isn't supported that retry restarts the current ROM.
 - Adding items while downloading recalculates overall bytes immediately; the overall % can dip when you enqueue mid-run (queue is not locked).
 - Queue view surfaces a retained "Recent failures" summary even when active queue items are empty.
-- Queue state is persisted to `sdmc:/switch/romm_switch_client/queue_state.json` so pending items survive restarts (deduped against completed-on-disk entries).
+- Queue state is persisted to `sdmc:/switch/TicromM/queue_state.json` so pending items survive restarts (deduped against completed-on-disk entries).
 
 ### Logging (see `logging.md`)
 - Info: start/finish per ROM, finalize path, queue actions, failures.

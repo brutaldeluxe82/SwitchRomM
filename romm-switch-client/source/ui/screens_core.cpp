@@ -379,7 +379,7 @@ void BuildInfoScreen(App& a) {
         AddText(a.layout, k + ":  " + v, kMargin + 30, y, kHint, kFontS, 1710);
         y += 60;
     };
-    section("RomM Switch");
+    section("TicromM");
     row("Version", romm::appVersion());
     row("UI", "Plutonium (Grout parity)");
     section("RomM");

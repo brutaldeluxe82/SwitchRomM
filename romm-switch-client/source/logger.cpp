@@ -1,4 +1,5 @@
 #include "romm/logger.hpp"
+#include "romm/config.hpp"
 #include "romm/filesystem.hpp"
 #include <fstream>
 #include <iostream>
@@ -9,7 +10,7 @@
 
 namespace romm {
 
-static const char* kLogPath = "sdmc:/switch/romm_switch_client/log.txt";
+static const std::string kLogPath = std::string(kAppDataDir) + "/log.txt";
 static constexpr size_t kMaxLogBytes = 512 * 1024; // simple cap to limit SD wear
 static bool gLogReady = false;
 static LogLevel gMinLevel = LogLevel::Info;
@@ -28,7 +29,7 @@ void initLogFile() {
     // Start a fresh log file on launch
     gLogFile.open(kLogPath, std::ios::trunc);
     if (gLogFile) {
-        gLogFile << "RomM Switch Client log start\n";
+        gLogFile << "TicromM log start\n";
         gLogFile.flush();
         gLogBytes = static_cast<size_t>(gLogFile.tellp());
         gLogReady = true;
@@ -82,7 +83,7 @@ static void logInternal(LogLevel level, const std::string& tag, const std::strin
         gLogFile.open(kLogPath, std::ios::trunc);
         gLogBytes = 0;
         if (gLogFile) {
-            gLogFile << "RomM Switch Client log start (rotated)\n";
+            gLogFile << "TicromM log start (rotated)\n";
             gLogFile.flush();
             gLogBytes = static_cast<size_t>(gLogFile.tellp());
         }

@@ -7,7 +7,7 @@
 namespace romm {
 
 // Persisted queue snapshot path (on SD).
-constexpr const char* kQueueStatePath = "sdmc:/switch/romm_switch_client/queue_state.json";
+inline constexpr const char* kQueueStatePath = "sdmc:/switch/TicromM/queue_state.json";
 
 // Save active queue entries (pending/running) to disk.
 bool saveQueueState(const Status& status, std::string& outError, const std::string& path = kQueueStatePath);

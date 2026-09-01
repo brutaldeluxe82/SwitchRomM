@@ -1,4 +1,4 @@
-// main.cpp — RomM Switch Client entry point (Grout-parity Plutonium UI).
+// main.cpp — TicromM entry point (Grout-parity Plutonium UI).
 // Owns: libnx service init, config/token load, RomServices start, the
 // Plutonium Application with the shared Layout, the screen stack, and the
 // frame loop (PollJobs + rebuild current screen when data revisions change).
@@ -33,7 +33,7 @@ namespace {
 // Crash forensics: unhandled C++ exceptions (std::terminate) and fatal
 // signals (SIGSEGV etc.) are logged to the SD log with a return-address
 // chain before dying, so a crash after "paired" (or anywhere else) leaves
-// evidence in sdmc:/switch/romm_switch_client/log.txt instead of vanishing.
+// evidence in sdmc:/switch/TicromM/log.txt instead of vanishing.
 void LogCrashFrameChain(const char* what) {
     romm::logLine(std::string("CRASH: ") + what);
     // Walk the frame pointer chain (AAPCS64: fp=x29). Best-effort; stops on
@@ -49,7 +49,7 @@ void LogCrashFrameChain(const char* what) {
         if (next <= fp) break; // chain must move upward
         fp = next;
     }
-    romm::logLine("CRASH END (lr addrs -> 'addr2line -e romm-switch-client.elf')");
+    romm::logLine("CRASH END (lr addrs -> 'addr2line -e TicromM.elf')");
 }
 
 void CrashTerminateHandler() {
@@ -85,7 +85,7 @@ void InstallCrashHandlers() {
 } // namespace
 
 
-constexpr const char* kUpdatePendingPath = "sdmc:/switch/romm_switch_client/update_pending.txt";
+constexpr const char* kUpdatePendingPath = "sdmc:/switch/TicromM/update_pending.txt";
 
 // RomApp — pu::ui::Application subclass; OnLoad builds the first screen.
 class RomApp final : public pu::ui::Application {

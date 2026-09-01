@@ -1,8 +1,10 @@
-# Switch Homebrew Starter + RomM Switch Client
+# TicromM
+
+A RomM client for the Nintendo Switch, built around [tico](https://ticoverse.com) — browse your RomM library, download ROMs straight into tico's folder layout, sync saves and BIOS.
 
 Two things here:
 - `hello-switch/`: minimal libnx sample to check your devkitPro setup.
-- `romm-switch-client/`: SDL2/libnx RomM downloader (the one you want).
+- `romm-switch-client/`: the TicromM client sources (Plutonium/libnx).
 
 ## Toolchain (Windows / devkitPro MSYS)
 1) Install devkitPro from https://devkitpro.org.  
@@ -29,15 +31,15 @@ make run     # sends via nxlink if hbmenu netloader (Y) is active
 ```
 Manual deploy: copy `build/hello-switch.nro` to `sd:/switch/hello-switch/hello-switch.nro`.
 
-## Build and run (romm-switch-client)
+## Build and run (TicromM)
 ```sh
 cd romm-switch-client
-make clean && make        # produces romm-switch-client.nro
+make clean && make        # produces TicromM.nro
 make run                  # nxlink to a Switch in netloader mode
 ```
 
 ### Runtime config (.env)
-Put `.env` at `sdmc:/switch/romm_switch_client/.env` (sample):
+Put `.env` at `sdmc:/switch/TicromM/.env` (sample):
 ```
 SERVER_URL=https://YOUR_ROMM_HOST:PORT     # http:// and https:// are supported
 USERNAME=your_username
@@ -88,7 +90,7 @@ Mappings are fixed in `source/input.cpp` (positional codes); UI hints match.
 
 ## Repo layout
 - `hello-switch/` - minimal libnx sample.
-- `romm-switch-client/` - full client sources (SDL, downloader, config, logging, docs in `docs/`).
+- `romm-switch-client/` - full client sources (Plutonium UI, downloader, config, logging, docs in `docs/`).
 - `.gitignore` - shared ignores.
 
 ## Tests (host)
@@ -109,4 +111,4 @@ Use the **MSYS2 MinGW64** shell (not PowerShell/MSYS). Override compiler if need
 ## Troubleshooting
 - `switch_rules` missing or link errors: ensure `DEVKITPRO` is set and packages are current (`pacman -Syu devkitA64 switch-dev switch-tools`).
 - `make run` fails: install `switch-tools` (`nxlink`), ensure hbmenu netloader is active and the Switch is reachable on LAN.
-- Logging empty: check `LOG_LEVEL` in `.env` and that `sdmc:/switch/romm_switch_client/` exists and is writable.
+- Logging empty: check `LOG_LEVEL` in `.env` and that `sdmc:/switch/TicromM/` exists and is writable.

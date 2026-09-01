@@ -374,7 +374,7 @@ std::string serializeConfigJson(const Config& cfg) {
 
 bool saveConfigJson(const Config& cfg, std::string& err) {
     err.clear();
-    const std::string path = "sdmc:/switch/romm_switch_client/config.json";
+    const std::string path = std::string(kAppDataDir) + "/config.json";
     std::ofstream out(path, std::ios::out | std::ios::binary | std::ios::trunc);
     if (!out) {
         err = "failed to open " + path + " for writing";
@@ -392,15 +392,24 @@ bool saveConfigJson(const Config& cfg, std::string& err) {
 bool loadConfig(Config& outCfg, std::string& outError, ErrorInfo* outInfo) {
     if (outInfo) *outInfo = ErrorInfo{};
     outError.clear();
-    const std::string envPath = "sdmc:/switch/romm_switch_client/.env";
-    const std::string jsonPath = "sdmc:/switch/romm_switch_client/config.json";
-
+    const std::string envPath = std::string(kAppDataDir) + "/.env";
+    const std::string jsonPath = std::string(kAppDataDir) + "/config.json";
     bool envTried = parseEnv(envPath, outCfg);
     bool jsonTried = parseJson(jsonPath, outCfg, outError);
+    // Rebrand migration: the TicromM dir starts empty, so also look at the
+    // pre-rebrand sdmc:/switch/romm_switch_client/ location once.
+    if (!envTried) {
+        const std::string legacyEnv = std::string(kLegacyAppDataDir) + "/.env";
+        if (parseEnv(legacyEnv, outCfg)) envTried = true;
+    }
+    if (!jsonTried) {
+        const std::string legacyJson = std::string(kLegacyAppDataDir) + "/config.json";
+        if (parseJson(legacyJson, outCfg, outError)) jsonTried = true;
+    }
 
     if (!envTried && !jsonTried) {
         setConfigError(outError, outInfo,
-                       "Missing config: place .env at sdmc:/switch/romm_switch_client/.env",
+                       std::string("Missing config: place .env at ") + kAppDataDir + "/.env",
                        ErrorCode::ConfigMissing,
                        "Configuration file is missing.");
         return false;

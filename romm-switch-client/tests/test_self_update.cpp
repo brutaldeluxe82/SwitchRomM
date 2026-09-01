@@ -48,18 +48,18 @@ static std::filesystem::path makeTempDir() {
 
 TEST_CASE("self_update: canonicalSelfNroPath enforces sdmc:/switch/.nro") {
     REQUIRE(romm::canonicalSelfNroPath("") ==
-            "sdmc:/switch/romm_switch_client/romm-switch-client.nro");
+            "sdmc:/switch/TicromM/TicromM.nro");
     REQUIRE(romm::canonicalSelfNroPath("sdmc:/switch/foo/bar.nro") ==
             "sdmc:/switch/foo/bar.nro");
     REQUIRE(romm::canonicalSelfNroPath("sdmc:/romm_cache/bar.nro") ==
-            "sdmc:/switch/romm_switch_client/romm-switch-client.nro");
-    REQUIRE(romm::canonicalSelfNroPath("romfs:/romm-switch-client.nro") ==
-            "sdmc:/switch/romm_switch_client/romm-switch-client.nro");
+            "sdmc:/switch/TicromM/TicromM.nro");
+    REQUIRE(romm::canonicalSelfNroPath("romfs:/TicromM.nro") ==
+            "sdmc:/switch/TicromM/TicromM.nro");
 }
 
 TEST_CASE("self_update: computeUpdateDirFromDownloadDir") {
     REQUIRE(romm::computeUpdateDirFromDownloadDir("") ==
-            "sdmc:/switch/romm_switch_client/app_update");
+            "sdmc:/switch/TicromM/app_update");
     REQUIRE(romm::computeUpdateDirFromDownloadDir("sdmc:/romm_cache") ==
             "sdmc:/romm_cache/app_update");
     REQUIRE(romm::computeUpdateDirFromDownloadDir("sdmc:/romm_cache/") ==
@@ -147,7 +147,7 @@ TEST_CASE("self_update: applyPendingSelfUpdate clears pointer for non-nro staged
     auto self = (dir / "self.nro").string();
     writeAll(self, "SELF");
 
-    auto staged = (dir / "app_update" / "romm-switch-client.nro.new").string();
+    auto staged = (dir / "app_update" / "TicromM.nro.new").string();
     writeAll(staged, "NOTNRO");
     writeAll(staged + ".part", "partial");
 
@@ -172,14 +172,14 @@ TEST_CASE("self_update: applyPendingSelfUpdate applies staged file and keeps onl
     auto updateDir = (dir / "app_update");
     std::filesystem::create_directories(updateDir);
 
-    auto self = (dir / "romm-switch-client.nro").string();
+    auto self = (dir / "TicromM.nro").string();
     writeAll(self, "OLD_SELF");
 
     // Pre-existing backup should be overwritten (keep only last backup).
-    auto bak = (updateDir / "romm-switch-client.nro.bak").string();
+    auto bak = (updateDir / "TicromM.nro.bak").string();
     writeAll(bak, "OLD_BAK");
 
-    auto staged = (updateDir / "romm-switch-client.nro.new").string();
+    auto staged = (updateDir / "TicromM.nro.new").string();
     // Match real NRO structure (magic at 0x10).
     std::string nro(0x10, '\0');
     nro += "NRO0";
@@ -213,10 +213,10 @@ TEST_CASE("self_update: applyPendingSelfUpdate can apply even if self doesn't ex
     auto updateDir = (dir / "app_update");
     std::filesystem::create_directories(updateDir);
 
-    auto self = (dir / "romm-switch-client.nro").string();
+    auto self = (dir / "TicromM.nro").string();
     // self does not exist
 
-    auto staged = (updateDir / "romm-switch-client.nro.new").string();
+    auto staged = (updateDir / "TicromM.nro.new").string();
     writeAll(staged, std::string("NRO0") + "NEW_SELF");
 
     auto pending = (dir / "update_pending.txt").string();

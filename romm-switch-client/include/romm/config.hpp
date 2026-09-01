@@ -6,6 +6,12 @@
 
 namespace romm {
 
+// Per-app data directory on SD (config, logs, queue/device-token state, NRO
+// update staging). TicromM uses its own dir; the legacy
+inline constexpr const char kAppDataDir[] = "sdmc:/switch/TicromM";
+// Pre-rebrand location; checked (read-only) during startup config lookup.
+inline constexpr const char kLegacyAppDataDir[] = "sdmc:/switch/romm_switch_client";
+
 struct Config {
     // Parsed config schema version (JSON); .env paths default to current behavior.
     int schemaVersion{1};
@@ -50,7 +56,7 @@ struct Config {
     std::string speedTestUrl;
     // Platform prefs source selection
     std::string platformPrefsMode{"auto"};      // auto | sd | romfs
-    std::string platformPrefsPathSd{"sdmc:/switch/SwitchRomM/platform_prefs.json"};
+    std::string platformPrefsPathSd{"sdmc:/switch/TicromM/platform_prefs.json"};
     std::string platformPrefsPathRomfs{"romfs:/platform_prefs.json"};
 };
 
@@ -86,7 +92,7 @@ inline std::string effectiveStatesDir(const Config& c) {
 bool loadConfig(Config& outCfg, std::string& outError, ErrorInfo* outInfo = nullptr);
 
 // Persist the interface-editable config (server_url/username/password and the
-// other parseJson keys) to sdmc:/switch/romm_switch_client/config.json.
+// other parseJson keys) to kAppDataDir (/TicromM) config.json.
 // apiToken is deliberately not written (see implementation note).
 bool saveConfigJson(const Config& cfg, std::string& err);
 

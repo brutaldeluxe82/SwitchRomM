@@ -14,6 +14,7 @@
 #include "romm/planner.hpp"
 #include "romm/queue_policy.hpp"
 #include "romm/self_update.hpp"
+#include "romm/config.hpp"
 #include "romm/md5.hpp"
 
 #include <algorithm>
@@ -38,7 +39,7 @@ constexpr size_t kRomsFirstPageLimit = 250;
 constexpr size_t kRomsNextPageLimit = 500;
 constexpr size_t kRemoteSearchThreshold = 1200;
 constexpr size_t kRemoteSearchLimit = 250;
-constexpr const char* kUpdatePendingPath = "sdmc:/switch/romm_switch_client/update_pending.txt";
+constexpr const char* kUpdatePendingPath = "sdmc:/switch/TicromM/update_pending.txt";
 
 // Fold common Latin-1/Latin-Extended codepoints to ASCII (ported).
 char foldCodepointToAscii(uint32_t cp) {
@@ -935,7 +936,7 @@ void RomServices::Start() {
         opt.keepAlive = true;
         opt.maxBodyBytes = 2 * 1024 * 1024;
         std::vector<std::pair<std::string, std::string>> headers;
-        headers.emplace_back("User-Agent", "romm-switch-client");
+        headers.emplace_back("User-Agent", "TicromM");
         headers.emplace_back("Accept", "application/vnd.github+json");
         const std::string kUpdateLatestUrl =
             "https://api.github.com/repos/Shalasere/SwitchRomM/releases/latest";
@@ -961,7 +962,7 @@ void RomServices::Start() {
             return out;
         }
         GitHubAsset asset;
-        if (!pickReleaseNroAsset(rel, asset, err, "romm-switch-client.nro")) {
+        if (!pickReleaseNroAsset(rel, asset, err, "TicromM.nro")) {
             out.ok = false;
             out.release = rel;
             out.error = err;
@@ -992,7 +993,7 @@ void RomServices::Start() {
         opt.timeoutSec = (config.httpTimeoutSeconds > 0) ? config.httpTimeoutSeconds : 20;
         opt.followRedirects = true;
         std::vector<std::pair<std::string, std::string>> headers;
-        headers.emplace_back("User-Agent", "romm-switch-client");
+        headers.emplace_back("User-Agent", "TicromM");
         headers.emplace_back("Accept", "application/octet-stream");
         ParsedHttpResponse parsed;
         uint64_t bytes = 0;

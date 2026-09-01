@@ -38,7 +38,7 @@ int compareVersions(const std::string& a, const std::string& b);
 bool pickReleaseNroAsset(const GitHubRelease& rel,
                          GitHubAsset& out,
                          std::string& outError,
-                         const std::string& preferredName = "romm-switch-client.nro");
+                         const std::string& preferredName = "TicromM.nro");
 
 } // namespace romm
 

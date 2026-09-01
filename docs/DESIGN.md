@@ -1,6 +1,6 @@
-# RomM Switch Client – Design Notes
+# TicromM – Design Notes
 
-Audience: senior C++ devs working on `romm-switch-client/`. Snapshot of constraints, principles, and near-term plan.
+Audience: senior C++ devs working on the TicromM client (`romm-switch-client/` dir). Snapshot of constraints, principles, and near-term plan.
 
 ## Goals
 - Stable SDL2/libnx client for RomM: browse platforms/ROMs, queue downloads, split for FAT32/DBI, show progress, stay responsive.
@@ -13,7 +13,7 @@ Audience: senior C++ devs working on `romm-switch-client/`. Snapshot of constrai
 - Input: `source/input.cpp` maps standard layout (A=Select/confirm, B=Back, Y=Queue view/add, X=Search on index views / Start downloads in queue, Plus=Settings, Minus=Quit). Device-auth pairing serves LOGIN (bearer token for all API calls) and save-sync (PLATFORMS SYNC index + SYNCROMS view; ZR/ZL cycles ROM/BIOS/SYNC).
 - HTTP/API: `source/api.cpp` hand-rolled HTTP (http-only, timeouts, chunked decode), JSON via `mini/json.hpp`, helpers to fetch platforms/ROMs/details and pick `.xci/.nsp`.
 - Downloader: `source/downloader.cpp` worker thread; preflight HEAD/Range; stream one GET per ROM; split into 0xFFFF0000 parts; finalize single vs multi-part; archive bit set; mutex guarding added in worker.
-- Config/logging: `.env`/JSON at `sdmc:/switch/romm_switch_client/`; leveled logging to SD + stdout/nxlink.
+- Config/logging: `.env`/JSON at `sdmc:/switch/TicromM/`; leveled logging to SD + stdout/nxlink.
 - Tests (host): Catch2 for URL parsing and chunked decode.
 
 ## Principles
@@ -59,4 +59,4 @@ P2 - quality
 ## Constraints / Deployment
 - Network: http only; use on trusted LAN or behind TLS-terminating proxy.
 - Output layout: FAT32/DBI splits (0xFFFF0000) in `<download_dir>/temp/<safe>.tmp/`, finalized to `<download_dir>/<fsName>` or `<fsName>/00 01 ...` with archive bit.
-- Logging path: `sdmc:/switch/romm_switch_client/log.txt`; keep `LOG_LEVEL=info` for normal use.
+- Logging path: `sdmc:/switch/TicromM/log.txt`; keep `LOG_LEVEL=info` for normal use.
