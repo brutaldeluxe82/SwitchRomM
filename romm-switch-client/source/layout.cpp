@@ -1,4 +1,5 @@
 #include "romm/layout.hpp"
+#include "romm/config.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -205,6 +206,14 @@ std::string layoutPlatformFolder(const std::string& rommSlug, OutputLayout layou
         if (canon == kv.first) return kv.second;
     }
     return "";
+}
+
+std::string platformFolderName(const std::string& rommSlug, const Config& cfg) {
+    OutputLayout layout = parseOutputLayout(cfg.outputLayout);
+    std::string folder = layoutPlatformFolder(rommSlug, layout);
+    // Unknown tico slug: fall back to the canonical slug (safeName-style
+    // folder) instead of dropping the download into a wrong or shared dir.
+    return folder.empty() ? normalizeSlug(rommSlug) : folder;
 }
 
 std::string defaultDownloadDir(OutputLayout layout) {

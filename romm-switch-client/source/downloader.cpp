@@ -119,15 +119,6 @@ static std::string safeName(const std::string& in) {
     return out;
 }
 
-static std::string romFolderName(const Game& g) {
-    std::string idSafe = safeName(!g.id.empty() ? g.id : g.fileId);
-    if (idSafe.empty() && !g.fsName.empty()) idSafe = safeName(g.fsName);
-    if (idSafe.empty()) idSafe = "rom";
-    std::string titleSafe = safeName(g.title);
-    if (titleSafe.empty()) return idSafe;
-    return titleSafe + "_" + idSafe;
-}
-
 struct PreflightInfo {
     bool supportsRanges{false};
     uint64_t contentLength{0};
@@ -642,13 +633,14 @@ static bool downloadOneFile(Game g, const DownloadFileSpec* spec, Status& status
     std::string fileSafe = safeName(g.fileId);
     if (romSafe.empty()) romSafe = "rom";
     if (fileSafe.empty()) fileSafe = "file";
-    // Final outputs live under <downloadDir>/<platform>/<title__id.ext>,
-    // or in the platform's BIOS dir for firmware files.
+    // Final outputs live under <downloadDir>/<platform>/<file>, or in the
+    // platform's BIOS dir for firmware files. The platform component uses the
+    // output-layout folder map (tico: dreamcast -> dc, arcade -> fbneo, ...).
     std::string baseDir;
     if (spec && spec->isBios) {
         baseDir = romm::biosDestinationDir(cfg, platformSlug);
     } else {
-        baseDir = effectiveDownloadDir(cfg) + "/" + platSafe + "/" + romFolderName(g);
+        baseDir = effectiveDownloadDir(cfg) + "/" + platformFolderName(platformSlug, cfg);
     }
     ensureDirectory(baseDir);
     // Temps live under <downloadDir>/temp/<platform>/<romId>/<fileId>/...

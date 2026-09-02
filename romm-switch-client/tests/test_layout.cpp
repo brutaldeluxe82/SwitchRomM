@@ -1,5 +1,6 @@
 #include "catch.hpp"
 #include "romm/layout.hpp"
+#include "romm/config.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -126,6 +127,28 @@ TEST_CASE("layoutPlatformFolder maps tico spot checks") {
     REQUIRE(romm::layoutPlatformFolder("saturn", romm::OutputLayout::Tico) == "saturn");
     REQUIRE(romm::layoutPlatformFolder("snes", romm::OutputLayout::Tico) == "snes");
     REQUIRE(romm::layoutPlatformFolder("wii", romm::OutputLayout::Tico) == "wii");
+}
+
+TEST_CASE("platformFolderName applies layout map from config") {
+    romm::Config tico;
+    tico.outputLayout = "tico";
+    // Slugs that differ from the on-device tico folder name.
+    REQUIRE(romm::platformFolderName("dreamcast", tico) == "dc");
+    REQUIRE(romm::platformFolderName("arcade", tico) == "fbneo");
+    REQUIRE(romm::platformFolderName("sms", tico) == "master-system");
+    REQUIRE(romm::platformFolderName("gamegear", tico) == "game-gear");
+    REQUIRE(romm::platformFolderName("segacd", tico) == "sega-cd");
+    REQUIRE(romm::platformFolderName("ngc", tico) == "gc");
+    // Identical-name slugs pass through unchanged.
+    REQUIRE(romm::platformFolderName("gba", tico) == "gba");
+    // Unknown tico slug falls back to the canonical slug (never empty).
+    REQUIRE(romm::platformFolderName("notaplatform", tico) == "notaplatform");
+    REQUIRE(romm::platformFolderName("", tico).empty());
+    // RetroArch layout: canonical slug is the folder.
+    romm::Config ra;
+    ra.outputLayout = "retroarch";
+    REQUIRE(romm::platformFolderName("dreamcast", ra) == "dreamcast");
+    REQUIRE(romm::platformFolderName("megadrive", ra) == "genesis");
 }
 
 TEST_CASE("platformSupportedByTico matches tico list (wiki + UI extras)") {

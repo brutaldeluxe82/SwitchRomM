@@ -5,6 +5,8 @@
 
 namespace romm {
 
+struct Config;
+
 // Output layout describes how downloaded ROMs are organized on the SD card.
 enum class OutputLayout { Tico, RetroArch };
 
@@ -21,6 +23,11 @@ std::string normalizeSlug(const std::string& slug);
 // Destination platform folder name under the layout's roms root.
 // Returns "" when the layout has no folder for this slug.
 std::string layoutPlatformFolder(const std::string& rommSlug, OutputLayout layout);
+// Destination platform folder for a download, from a Config: applies the
+// output-layout folder map (tico: dreamcast -> dc, arcade -> fbneo, ...).
+// RetroArch layout yields the canonical slug; unknown tico slugs yield the
+// canonical slug as a sane fallback (folder map has no entry).
+std::string platformFolderName(const std::string& rommSlug, const Config& cfg);
 
 // Layout default download roots:
 //   tico: "sdmc:/tico/roms"; retroarch: "sdmc:/retroarch/downloads"
