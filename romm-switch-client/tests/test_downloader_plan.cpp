@@ -176,3 +176,71 @@ TEST_CASE("buildFirmwareBundle skips empty file names") {
     REQUIRE(bundle.files.size() == 1);
     REQUIRE(bundle.files[0].fileId == "2");
 }
+
+// ---------- multi-disc handling (tico wiki: linked discs must share base
+// name + (Disc N)/(Disk N)/(CD N); server downloads each disc separately) ----------
+
+namespace {
+
+romm::RomFile makeFile(const std::string& id, const std::string& name,
+                       const std::string& path, uint64_t size) {
+    romm::RomFile rf;
+    rf.id = id;
+    rf.name = name;
+    rf.path = path;
+    rf.url = "http://x/api/roms/1/content/" + name;
+    rf.sizeBytes = size;
+    rf.category = "game";
+    return rf;
+}
+
+} // namespace
+
+TEST_CASE("planner: multi-disc game downloads every disc (bundle_best)") {
+    romm::Game g;
+    g.id = "1350";
+    g.title = "Chrono Cross";
+    g.platformSlug = "psx";
+    g.files.push_back(makeFile("1", "Chrono Cross (USA) (Disc 1).chd", "roms/psx/Chrono Cross (USA)", 403357279));
+    g.files.push_back(makeFile("2", "Chrono Cross (USA) (Disc 2).chd", "roms/psx/Chrono Cross (USA)", 390327286));
+
+    romm::PlatformPrefs prefs; // defaultMode = bundle_best
+    romm::DownloadBundle bundle = romm::buildBundleFromGame(g, prefs);
+    REQUIRE(bundle.files.size() == 2);
+    REQUIRE(bundle.totalSize() == 403357279ULL + 390327286ULL);
+    // Each disc keeps its own file name so tico's disc-linking finds them.
+    REQUIRE(bundle.files[0].name.find("(Disc 1)") != std::string::npos);
+    REQUIRE(bundle.files[1].name.find("(Disc 2)") != std::string::npos);
+}
+
+TEST_CASE("planner: single_best on a multi-disc set still picks one disc only") {
+    romm::Game g;
+    g.id = "1274";
+    g.title = "Panzer Dragoon Saga";
+    g.platformSlug = "saturn";
+    g.files.push_back(makeFile("1", "Panzer Dragoon Saga (Europe) (Disc 1).chd", "roms/saturn/x", 397928216));
+    g.files.push_back(makeFile("2", "Panzer Dragoon Saga (Europe) (Disc 2).chd", "roms/saturn/x", 340840805));
+
+    romm::PlatformPrefs prefs;
+    prefs.defaultMode = "single_best";
+    romm::DownloadBundle bundle = romm::buildBundleFromGame(g, prefs);
+    REQUIRE(bundle.files.size() == 1);
+    REQUIRE(bundle.totalSize() == 397928216ULL);
+}
+
+TEST_CASE("planner: soundtrack/extra files excluded from multi-disc bundle") {
+    romm::Game g;
+    g.id = "7";
+    g.title = "Game With Extras";
+    g.platformSlug = "psx";
+    g.files.push_back(makeFile("1", "Game (Disc 1).chd", "roms/psx/Game", 100));
+    g.files.push_back(makeFile("2", "Game (Disc 2).chd", "roms/psx/Game", 200));
+    romm::RomFile snd = makeFile("3", "Game Soundtrack.mp3", "roms/psx/Game", 50);
+    snd.category = "soundtrack";
+    g.files.push_back(snd);
+
+    romm::PlatformPrefs prefs;
+    romm::DownloadBundle bundle = romm::buildBundleFromGame(g, prefs);
+    REQUIRE(bundle.files.size() == 2);
+    REQUIRE(bundle.totalSize() == 300);
+}

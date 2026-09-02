@@ -1281,10 +1281,16 @@ bool enrichGameWithFiles(const Config& cfg, Game& g, std::string& outError, Erro
     if (!bestId.empty()) {
         g.fsName = bestName;
         g.fileId = bestId;
-        g.sizeBytes = bestSize;
         g.downloadUrl = bestDownloadUrl;
+        // Display size covers ALL game files (multi-disc sets sum their
+        // discs; matches server fs_size_bytes per RomM scan_handler).
+        uint64_t total = 0;
+        for (const auto& f : g.files) {
+            if (f.category.empty() || f.category == "game") total += f.sizeBytes;
+        }
+        g.sizeBytes = total > 0 ? total : bestSize;
         logInfo("Selected file via files[] id=" + bestId + " name=" + bestName +
-                " size=" + std::to_string(bestSize) + " for " + g.title, "API");
+                " total=" + std::to_string(g.sizeBytes) + " for " + g.title);
     } else {
         logInfo("No preferred (.xci/.nsp) file found; bundle selection will use full files list.", "API");
     }
